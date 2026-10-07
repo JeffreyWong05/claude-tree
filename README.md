@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Claude Tree
 
-## Getting Started
+Long chats with Claude are linear, but your thinking isn't: you dive into a term, ask a side question,
+then try to find where you left off. Claude Tree reads your Claude Code sessions and organizes them into a
+**topic tree**: tangents become branches, and returning to a topic becomes a new branch of that topic.
+Click any node to jump straight to that point in the conversation.
 
-First, run the development server:
+## Requirements
+
+- Node.js 20+
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in (`claude` on your PATH).
+  Building a tree runs `claude -p` once per conversation using your Claude subscription. No API key needed.
+
+## Run it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000, pick a session, and click **Build topic tree**.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Or from the terminal:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run treeify -- list
+npm run treeify -- <session-id>
+```
 
-## Learn More
+## Configuration (optional)
 
-To learn more about Next.js, take a look at the following resources:
+| Env var | Default | Purpose |
+|---|---|---|
+| `CLAUDE_BIN` | `claude` | Path to the Claude Code executable |
+| `CLAUDE_TREE_MODEL` | `sonnet` | Model used to build trees |
+| `CLAUDE_PROJECTS_DIR` | `~/.claude/projects` | Where Claude Code transcripts live |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Generated trees are saved in `data/trees/` and are gitignored, since they contain your chat content.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what's planned and [docs/DECISIONS.md](docs/DECISIONS.md) for why things work the way they do.
