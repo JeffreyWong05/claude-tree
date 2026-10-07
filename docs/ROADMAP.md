@@ -9,10 +9,13 @@ Tick items off as they land; add dates when a milestone completes.
 - [x] Session list + topic map sidebar + click-to-jump + scroll-spy highlight
 - [x] "Build tree" button in UI and `npm run treeify` CLI
 - [x] Stale-tree detection ("New since tree was built")
-- [ ] Install Claude Code CLI, log in, and run a real treeify end-to-end
+- [x] Install Claude Code CLI, log in, and run a real treeify end-to-end (2026-10-07)
 - [ ] Tune the treeify prompt on 3–4 real long sessions
 
 ## Milestone 2 — Better navigation
+- [x] One "unorganized" leaf per message the tree doesn't cover yet; removed only by a rebuild — 2026-10-07
+- [x] Organized-% meter + "Rebuild tree (organize N new)" — 2026-10-07
+- [x] Expand a topic to list its prompts as 2–4 word labels (Claude labels on rebuild, keyword fallback before) and jump to each — 2026-10-07
 - [ ] Graphical map view (React Flow) alongside the outline
 - [ ] Collapse/expand subtrees; collapse long Claude replies
 - [ ] Manual edits: rename a segment, move a split point, re-parent a segment (saved to the tree file)
@@ -25,8 +28,16 @@ Tick items off as they land; add dates when a milestone completes.
 - [ ] Follow `parentUuid` for rewound/edited Claude Code sessions instead of file order
 
 ## Milestone 4 — Continue from a leaf
-- [ ] "Resume here": generate a context prompt from root → selected segment to start a new chat focused on that branch
+- [x] "Open in Claude" deep link per topic (`claude://code/continue`, `claude://resume` fallback) — 2026-10-07
+- [x] "Continue from this leaf": recap of root → segment pre-filled into a new Code session (`claude://code/new?q=`) — 2026-10-07
+- [ ] Test both links end-to-end from the browser (first click asks to allow opening Claude)
+- [ ] Scroll to the exact message when opening a chat (the app's link doesn't support this today)
 - [ ] Live chat inside the app, context = path to current node
+
+## Milestone 4b — Live updates
+- [ ] Watch transcript files (`fs.watch`) and mark trees stale automatically (free)
+- [ ] Incremental classify: send only the new turn + current segment list instead of rebuilding
+- [ ] Optional Claude Code `Stop` hook to trigger the incremental update after each reply
 
 ## Milestone 5 — Shareable
 - [ ] API-key runner (`ClaudeRunner` implementation) for people without Claude Code

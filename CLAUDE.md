@@ -17,7 +17,9 @@ Start of every session: read `docs/ROADMAP.md` (what's next) and `docs/DECISIONS
 3. **Runner**: `src/lib/runner.ts` — `ClaudeRunner` interface. Only implementation today is `cliRunner`
    (`claude -p`, uses the user's Claude subscription, no API key). Add an API-key runner behind the same interface.
 4. **Store**: trees are cached in `data/trees/<id>.json` (gitignored — contains chat content).
-5. **UI**: `/` lists sessions; `/c/[id]` shows the topic map (sidebar) + transcript grouped by segment.
+5. **Deep links**: `src/lib/links.ts` builds `claude://` links (open chat / continue from leaf); desktop session
+   ids come from `src/lib/sources/desktopSessions.ts`. Undocumented app internals — see docs/DECISIONS.md.
+6. **UI**: `/` lists sessions; `/c/[id]` shows the topic map (sidebar) + transcript grouped by segment.
 
 ## Commands
 
@@ -35,4 +37,4 @@ npx tsc --noEmit && npx eslint src scripts
   and call `await connection()` (or await `params`). Read `node_modules/next/dist/docs/` before using new APIs.
 - Domain types live in `src/lib/types.ts`. Segments are contiguous turn ranges; `parent` always points to an earlier segment.
 - Never commit anything under `data/` or any `.env*` file.
-- Env vars: `CLAUDE_BIN` (path to claude), `CLAUDE_TREE_MODEL` (default `sonnet`), `CLAUDE_PROJECTS_DIR`.
+- Env vars: `CLAUDE_BIN` (path to claude), `CLAUDE_TREE_MODEL` (default `sonnet`), `CLAUDE_PROJECTS_DIR`, `CLAUDE_DESKTOP_DIR`.

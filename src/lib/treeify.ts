@@ -1,4 +1,5 @@
 import type { Conversation, Segment, SegmentKind, TopicTree, Turn } from "@/lib/types";
+import { fallbackLabel } from "@/lib/labels";
 import { cliRunner, type ClaudeRunner } from "@/lib/runner";
 
 /** Rough cap on transcript size sent to Claude; long chats get more aggressive clipping. */
@@ -42,9 +43,13 @@ Split the conversation into SEGMENTS: contiguous runs of turns about one topic. 
 - title: 2-6 words, specific (e.g. "JWT refresh tokens", not "Question about auth").
 - summary: one sentence on what was discussed or decided, so the user knows where they left off.
 
+Also give every turn a LABEL: 2-4 words naming what the user asked or did in that turn, so it can be
+listed in a compact menu (e.g. "Add HP-cost cards", "Explain API keys", "Deploy to Netlify"). Exactly one label per turn, in order.
+
 Output exactly:
-{"segments":[{"start":0,"parent":null,"kind":"root","title":"...","summary":"..."}, ...]}
+{"segments":[{"start":0,"parent":null,"kind":"root","title":"...","summary":"..."}, ...],"labels":["...", ...]}
 "start" values must be strictly increasing turn indices. Each segment runs until the next segment's start.
+"labels" has exactly ${turns.length} entries.
 
 TRANSCRIPT (${turns.length} turns; long messages are clipped):
 
@@ -59,18 +64,30 @@ interface RawSegment {
   summary?: unknown;
 }
 
-/** Parses Claude's reply and repairs anything that would break the tree invariants. */
-export function parseSegments(reply: string, turnCount: number): Segment[] {
-  const json = reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1);
-  let raw: RawSegment[];
+function extractJson(reply: string): { segments?: unknown; labels?: unknown } {
   try {
-    raw = JSON.parse(json).segments;
+    return JSON.parse(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1));
   } catch {
     throw new Error(`Claude did not return valid JSON:\n${reply.slice(0, 500)}`);
   }
+}
+
+/** One short label per turn; anything missing or malformed falls back to a label made from the prompt. */
+export function parseLabels(reply: string, turns: Turn[]): string[] {
+  const raw = extractJson(reply).labels;
+  const labels = Array.isArray(raw) ? raw : [];
+  return turns.map((t, i) => {
+    const label = typeof labels[i] === "string" ? labels[i].trim() : "";
+    return label && label.length <= 40 ? label : fallbackLabel(t.user);
+  });
+}
+
+/** Parses Claude's reply and repairs anything that would break the tree invariants. */
+export function parseSegments(reply: string, turnCount: number): Segment[] {
+  const raw = extractJson(reply).segments as RawSegment[];
   if (!Array.isArray(raw) || raw.length === 0) throw new Error("Claude returned no segments.");
 
-  const kinds: SegmentKind[] = ["continue", "tangent", "return"];
+  const kinds: SegmentKind[] = ["continue", "tangent", "return"]; // "unsorted" is display-only
   const segments: Segment[] = [];
   let lastStart = -1;
   for (const r of raw) {
@@ -108,5 +125,6 @@ export async function treeify(
     turnCount: turns.length,
     model: `${runner.name}:${model}`,
     segments: parseSegments(reply, turns.length),
+    turnLabels: parseLabels(reply, turns),
   };
 }

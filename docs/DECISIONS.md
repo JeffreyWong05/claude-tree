@@ -26,3 +26,25 @@ sessions in a separate project folder that the session list filters out.
 
 ## 2026-10-06 — Instant jumps, no smooth scrolling
 Smooth scrolling overshot targets on long pages in testing; instant anchor jumps land exactly.
+
+## 2026-10-07 — Deep links into the Claude desktop app
+Found in the desktop app's URL handler (undocumented, v2.26454):
+`claude://code/continue?session=local_<id>`, `claude://resume?session=<cli-uuid>`,
+`claude://code/new?q=<prompt>&folder=<path>` (q capped at 14,336 chars).
+The `local_` id comes from `%APPDATA%/Claude/claude-code-sessions/**/local_*.json` (`cliSessionId` → `sessionId`).
+All of this lives in `src/lib/links.ts` and `src/lib/sources/desktopSessions.ts`, so an app update only breaks one place.
+Links open the right chat but can't scroll to a message; topic headers show the starting message number instead.
+
+## 2026-10-07 — "Continue from this leaf" recap is built locally
+The recap (original goal, topic path with summaries, last exchange, transcript path) is assembled from the saved
+tree with no Claude call, so it's instant and free.
+
+## 2026-10-07 — New messages become individual "unorganized" leaves
+Instead of live re-organizing (costs usage on every message), each message the tree doesn't cover is shown as its
+own `unsorted` leaf under the last organized topic. They are display-only (never saved) and vanish on rebuild, so
+the count doubles as a "how unorganized is this chat" meter. Cost while chatting: zero.
+
+## 2026-10-07 — Per-prompt labels
+The treeify prompt also asks for a 2–4 word label per turn (`turnLabels`), adding only ~5–10 output tokens per turn.
+Before a rebuild — and for trees built before labels existed — `fallbackLabel` picks the first meaningful words
+of the prompt (stopword filtering), which is free but less accurate.

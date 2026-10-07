@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Conversation, ConversationMeta, Turn } from "@/lib/types";
 import { RUNNER_DIR_NAME } from "@/lib/runner";
+import { loadDesktopSessions } from "@/lib/sources/desktopSessions";
 
 /** Claude Code stores one JSONL transcript per session under ~/.claude/projects/<project>/<id>.jsonl */
 export const PROJECTS_DIR =
@@ -68,12 +69,16 @@ export function loadConversation(id: string): Conversation | null {
   const file = findTranscript(id);
   if (!file) return null;
   const raw = fs.readFileSync(file, "utf8");
+  const cwd = raw.match(/"cwd":"((?:[^"\\]|\\.)*)"/)?.[1];
   return {
     id,
     source: "claude-code",
     title: readTitle(file),
     project: projectLabel(path.basename(path.dirname(file))),
     updatedAt: fs.statSync(file).mtime.toISOString(),
+    cwd: cwd ? JSON.parse(`"${cwd}"`) : undefined,
+    transcriptPath: file,
+    desktop: loadDesktopSessions().get(id),
     turns: parseTurns(raw),
   };
 }

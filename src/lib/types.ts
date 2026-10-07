@@ -14,6 +14,12 @@ export interface Conversation {
   title: string;
   project: string;
   updatedAt: string;
+  /** Working directory the session ran in (used to open follow-up sessions in the same folder). */
+  cwd?: string;
+  /** Absolute path of the transcript file. */
+  transcriptPath?: string;
+  /** Present when the session also exists in the Claude desktop app. */
+  desktop?: { sessionId: string; archived: boolean };
   turns: Turn[];
 }
 
@@ -32,8 +38,9 @@ export interface ConversationMeta {
  * - continue: the same goal moving forward
  * - tangent:  a deeper dive / side question branching off the parent
  * - return:   picking a parent topic back up after a tangent
+ * - unsorted: a message added after the tree was built (display-only, one per message, never saved)
  */
-export type SegmentKind = "root" | "continue" | "tangent" | "return";
+export type SegmentKind = "root" | "continue" | "tangent" | "return" | "unsorted";
 
 /** A contiguous run of turns about one topic. Segments form a tree via `parent`. */
 export interface Segment {
@@ -54,4 +61,6 @@ export interface TopicTree {
   turnCount: number;
   model: string;
   segments: Segment[];
+  /** 2-4 word label per prompt, indexed by turn. Missing in trees built before labels existed. */
+  turnLabels?: string[];
 }
