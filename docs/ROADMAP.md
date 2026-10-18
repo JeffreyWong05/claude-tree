@@ -56,6 +56,6 @@ Tick items off as they land; add dates when a milestone completes.
 - [ ] API-key runner (`ClaudeRunner` implementation) for people without Claude Code
 - [x] Double-click launchers (`Start Claude Tree.bat` / `.command`) → `scripts/launch.mjs`: install, build when changed, check Claude Code, start on :3456, open browser — 2026-10-18
 - [x] Home-page setup checklist (`/api/health`), installable app manifest + icons, non-coder README — 2026-10-18
-- [ ] Publish the repo on GitHub (README assumes "Download ZIP" from the project page)
+- [x] Published: https://github.com/JeffreyWong05/claude-tree (public) — 2026-10-18
 - [ ] Test the Mac launcher on a real Mac (written blind: Gatekeeper, PATH from Finder, nvm/Homebrew)
 - [ ] Sample data / demo mode for people without Claude Code chats yet
