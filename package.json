@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "treeify": "tsx scripts/treeify.ts"
+    "treeify": "tsx scripts/treeify.ts",
+    "launch": "node scripts/launch.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.12.0",

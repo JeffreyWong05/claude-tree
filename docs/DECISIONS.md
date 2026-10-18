@@ -80,3 +80,12 @@ the normalized chat text (prompts + replies, markdown/tags stripped). Prompts to
 point at the nearest earlier prompt's phrase plus "N messages down". Phrases are recomputed on every page load,
 so they stay unique as the chat grows. Known gap: text the app shows that we don't parse (tool output) could
 contain the phrase too. The Claude app has Electron find-in-page (checked in v2.42304).
+
+## 2026-10-18 — Non-coder launch: thin double-click wrappers around one Node script
+`Start Claude Tree.bat` / `.command` only check that Node exists (opening nodejs.org if not) and run
+`scripts/launch.mjs`, which holds all logic once, cross-platform: `npm install` when `package-lock.json` is newer
+than the last install, `next build` when any source is newer than `.next/BUILD_ID` (so downloaded updates rebuild
+themselves), a Claude Code check, then `next start` on port 3456 and open the browser once `/api/health` answers.
+Production mode, not `next dev`: faster pages, and it avoids the dev server's crash-after-many-reloads issue.
+Port 3456 (not 3000) so it doesn't collide with other dev servers. `.gitattributes` pins CRLF for `.bat` and LF
+for `.command`, and the `.command` file is committed executable (mode 100755).

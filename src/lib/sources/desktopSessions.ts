@@ -12,7 +12,7 @@ export interface DesktopSession {
   archived: boolean;
 }
 
-function desktopDataDir(): string {
+export function desktopDataDir(): string {
   if (process.env.CLAUDE_DESKTOP_DIR) return process.env.CLAUDE_DESKTOP_DIR;
   if (process.platform === "win32") return path.join(process.env.APPDATA ?? "", "Claude");
   if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "Claude");

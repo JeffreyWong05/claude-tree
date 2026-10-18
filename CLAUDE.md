@@ -25,6 +25,7 @@ Start of every session: read `docs/ROADMAP.md` (what's next) and `docs/DECISIONS
 
 ```bash
 npm run dev                         # http://localhost:3000
+npm run launch                      # what "Start Claude Tree" runs: install/build if needed, start on :3456
 npm run treeify -- list             # recent sessions
 npm run treeify -- <id>             # build + save a tree from the terminal
 npm run treeify -- <id> --dry       # print the prompt without calling Claude
