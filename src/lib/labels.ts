@@ -21,7 +21,10 @@ const STOPWORDS = new Set(
  * Placeholder until a rebuild asks Claude for real summaries.
  */
 export function fallbackLabel(text: string): string {
-  const clean = text.replace(/https?:\/\/\S+/g, "").replace(/[`*_#>\[\]()]/g, " ");
+  const clean = text
+    .replace(/<\/?[a-z_-]+(\s[^>]*)?>/gi, " ") // wrapper tags such as <pasted_content id="…">
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[`*_#>\[\]()]/g, " ");
   const sentences = clean.split(/(?<=[.!?\n])\s+/);
   for (const sentence of sentences) {
     const words = sentence
@@ -39,5 +42,7 @@ export function fallbackLabel(text: string): string {
 /** Claude's label when the tree covers this turn, otherwise the fallback. */
 export function labelFor(turn: Turn, tree: TopicTree | null): string {
   const fromTree = tree && turn.index < tree.turnCount ? tree.turnLabels?.[turn.index] : undefined;
-  return fromTree || fallbackLabel(turn.user);
+  if (fromTree) return fromTree;
+  if (!turn.user.trim() && turn.attachments.length) return `Shared ${turn.attachments[0].kind === "file" ? "file" : "image"}`;
+  return fallbackLabel(turn.user);
 }

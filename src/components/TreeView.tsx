@@ -1,13 +1,23 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { fallbackLabel, labelFor } from "@/lib/labels";
+import { labelFor } from "@/lib/labels";
+import { AttachmentList, ScreenshotStrip } from "@/components/Attachments";
 import { buildRecap, newSessionUrl, openInClaudeUrl } from "@/lib/links";
+import { buildThemes, isDimmed, themeColor, type Spotlight, type ThemeModel } from "@/lib/themes";
 import type { Conversation, Segment, TopicTree, Turn } from "@/lib/types";
+
+// The diagram library only loads when the Diagram view is opened.
+const TreeDiagram = dynamic(() => import("@/components/TreeDiagram"), {
+  ssr: false,
+  loading: () => <p className="p-6 text-sm text-muted">Loading diagram…</p>,
+});
 
 const KIND_ICON: Record<Segment["kind"], string> = {
   root: "◆",
@@ -29,7 +39,7 @@ function displaySegments(conversation: Conversation, tree: TopicTree | null): Se
       id: segments.length,
       parent: anchor,
       kind: "unsorted",
-      title: fallbackLabel(turn.user),
+      title: labelFor(turn, null),
       summary: "",
       startTurn: turn.index,
       endTurn: turn.index,
@@ -43,6 +53,37 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
   const [active, setActive] = useState({ segment: 0, turn: 0 });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [mapOpen, setMapOpen] = useState(false);
+  const [view, setView] = useState<"transcript" | "diagram">("transcript");
+  /** Any navigation from the map or diagram: show the transcript, then scroll to the target (e.g. "seg-3"). */
+  const goTo = useCallback((target: string) => {
+    // Render the transcript synchronously so the target element is visible before scrolling.
+    flushSync(() => {
+      setMapOpen(false);
+      setView("transcript");
+    });
+    document.getElementById(target)?.scrollIntoView();
+    history.replaceState(null, "", `#${target}`);
+  }, []);
+
+  const labelOf = useCallback((i: number) => labelFor(conversation.turns[i], tree), [conversation, tree]);
+  const themes = useMemo(() => buildThemes(segments, tree?.themes), [segments, tree]);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  /** Copy a prompt's Ctrl+F search phrase, for finding it in the Claude app. */
+  const copyFind = useCallback(
+    (turnIndex: number) => {
+      const find = conversation.turns[turnIndex]?.find;
+      if (!find) return;
+      copyText(find.phrase);
+      const down = find.messagesDown ? `, then scroll down ${find.messagesDown} message${find.messagesDown === 1 ? "" : "s"}` : "";
+      setToast(`Copied “${find.phrase}” — in Claude, press Ctrl+F and paste${down} to reach #${turnIndex + 1}.`);
+      clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 6000);
+    },
+    [conversation],
+  );
+  /** Shared by the diagram and the sidebar: fade everything except unique ideas or one theme. */
+  const [spotlight, setSpotlight] = useState<Spotlight>(null);
 
   // Scroll spy: track the topic and the message currently at the top of the viewport.
   useEffect(() => {
@@ -61,18 +102,22 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
     return () => observer.disconnect();
   }, [segments]);
 
-  const toggle = (id: number, open?: boolean) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (open ?? !next.has(id)) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+  const toggle = useCallback(
+    (id: number, open?: boolean) =>
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (open ?? !next.has(id)) next.add(id);
+        else next.delete(id);
+        return next;
+      }),
+    [],
+  );
 
   const total = conversation.turns.length;
   const unsorted = segments.filter((s) => s.kind === "unsorted").length;
 
   return (
+    <FindContext.Provider value={copyFind}>
     <div className="flex min-h-screen w-full">
       <aside
         className={`${mapOpen ? "fixed inset-0 z-20 block" : "hidden"} w-full overflow-y-auto border-r border-border bg-panel p-4 md:sticky md:top-0 md:block md:h-screen md:w-80 md:shrink-0`}
@@ -86,8 +131,29 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
           {total} messages · {segments.length - unsorted} topic{segments.length - unsorted === 1 ? "" : "s"}
         </p>
         <OrganizedMeter total={total} unsorted={unsorted} />
+        <div className="mt-3 grid grid-cols-2 rounded-md border border-border p-0.5 text-sm" role="tablist">
+          {(["transcript", "diagram"] as const).map((v) => (
+            <button
+              key={v}
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => {
+                if (v === "transcript") goTo(`turn-${active.turn}`); // back to where you were reading
+                else {
+                  setView(v);
+                  setMapOpen(false);
+                }
+              }}
+              className={`rounded px-2 py-1 ${view === v ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+            >
+              {v === "transcript" ? "📜 Transcript" : "🌳 Diagram"}
+            </button>
+          ))}
+        </div>
         <a
           href={openInClaudeUrl(conversation)}
+          onClick={() => copyFind(active.turn)}
+          title={`Opens this chat in Claude and copies a Ctrl+F search phrase for message #${active.turn + 1}`}
           className="mt-3 block w-full rounded-md border border-border px-3 py-1.5 text-center text-sm hover:bg-background"
         >
           Open chat in Claude ↗
@@ -104,8 +170,10 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
             active={active}
             expanded={expanded}
             toggle={toggle}
-            labelOf={(i) => labelFor(conversation.turns[i], tree)}
-            onPick={() => setMapOpen(false)}
+            labelOf={labelOf}
+            onPick={goTo}
+            themes={themes}
+            spotlight={spotlight}
           />
         </nav>
       </aside>
@@ -117,13 +185,40 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
         >
           ☰ Map · {segments[active.segment]?.title}
         </button>
-        <div className="mx-auto max-w-3xl space-y-12">
+        {view === "diagram" && (
+          <div className="sticky top-4 h-[calc(100vh-6rem)] overflow-hidden rounded-lg border border-border bg-panel md:h-[calc(100vh-3rem)]">
+            <TreeDiagram
+              segments={segments}
+              active={active.segment}
+              activeTurn={active.turn}
+              expanded={expanded}
+              onToggle={toggle}
+              labelOf={labelOf}
+              onPick={goTo}
+              onCopyFind={copyFind}
+              themes={themes}
+              spotlight={spotlight}
+              onSpotlight={setSpotlight}
+            />
+          </div>
+        )}
+        {/* Kept mounted (just hidden) in Diagram view so reading position and scroll tracking survive. */}
+        <div className={`mx-auto max-w-3xl space-y-12 ${view === "diagram" ? "hidden" : ""}`}>
           {segments.map((s) => (
             <SegmentSection key={s.id} segment={s} segments={segments} conversation={conversation} />
           ))}
         </div>
       </main>
+      {toast && (
+        <div
+          role="status"
+          className="fixed bottom-4 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-lg bg-foreground px-4 py-2 text-sm text-background shadow-lg"
+        >
+          {toast}
+        </div>
+      )}
     </div>
+    </FindContext.Provider>
   );
 }
 
@@ -147,17 +242,19 @@ function OrganizedMeter({ total, unsorted }: { total: number; unsorted: number }
 }
 
 interface TopicNodesProps {
+  themes: ThemeModel | null;
+  spotlight: Spotlight;
   segments: Segment[];
   parent: number | null;
   active: { segment: number; turn: number };
   expanded: Set<number>;
   toggle: (id: number, open?: boolean) => void;
   labelOf: (turnIndex: number) => string;
-  onPick: () => void;
+  onPick: (target: string) => void;
 }
 
 function TopicNodes(props: TopicNodesProps) {
-  const { segments, parent, active, expanded, toggle, labelOf, onPick } = props;
+  const { segments, parent, active, expanded, toggle, labelOf, onPick, themes, spotlight } = props;
   const children = segments.filter((s) => s.parent === parent);
   if (children.length === 0) return null;
   return (
@@ -169,7 +266,7 @@ function TopicNodes(props: TopicNodesProps) {
         return (
           <li key={s.id}>
             <div
-              className={`my-0.5 flex items-start rounded text-sm ${s.id === active.segment ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"}`}
+              className={`my-0.5 flex items-start rounded text-sm ${s.id === active.segment ? "bg-accent-soft font-medium text-accent" : "hover:bg-background"} ${isDimmed(spotlight, themes?.ofSegment.get(s.id)) ? "opacity-35" : ""}`}
             >
               <button
                 onClick={() => multi && toggle(s.id)}
@@ -180,15 +277,19 @@ function TopicNodes(props: TopicNodesProps) {
               </button>
               <a
                 href={`#seg-${s.id}`}
-                onClick={() => {
+                onClick={(e) => {
+                  e.preventDefault();
                   if (multi) toggle(s.id, true);
-                  onPick();
+                  onPick(`seg-${s.id}`);
                 }}
                 title={s.summary || undefined}
                 className={`flex min-w-0 flex-1 gap-1.5 py-1 pr-2 ${unsorted ? "italic text-muted" : ""}`}
               >
                 <span className="w-3 shrink-0 not-italic text-muted">{KIND_ICON[s.kind]}</span>
-                <span className="min-w-0 flex-1">{s.title}</span>
+                <span className="min-w-0 flex-1">
+                  <ThemeMark theme={themes?.ofSegment.get(s.id)} />
+                  {s.title}
+                </span>
                 <span className="shrink-0 font-mono text-[10px] not-italic text-muted">{s.startTurn + 1}</span>
               </a>
             </div>
@@ -198,7 +299,10 @@ function TopicNodes(props: TopicNodesProps) {
                   <li key={i}>
                     <a
                       href={`#turn-${i}`}
-                      onClick={onPick}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        onPick(`turn-${i}`);
+                      }}
                       className={`flex gap-1.5 rounded-r py-0.5 pr-2 pl-2 text-xs ${i === active.turn ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}
                     >
                       <span className="min-w-0 flex-1 truncate">{labelOf(i)}</span>
@@ -227,6 +331,7 @@ function SegmentSection({ segment, segments, conversation }: { segment: Segment;
   const turns = conversation.turns.slice(segment.startTurn, segment.endTurn + 1);
   const continueUrl = newSessionUrl(buildRecap(conversation, segments, segment), conversation.cwd);
   const unsorted = segment.kind === "unsorted";
+  const copyFind = useContext(FindContext);
   return (
     <section id={`seg-${segment.id}`} data-segment={segment.id} className="scroll-mt-14 md:scroll-mt-6">
       <header className={`mb-4 border-b pb-3 ${unsorted ? "border-dashed border-border" : "border-border"}`}>
@@ -247,10 +352,11 @@ function SegmentSection({ segment, segments, conversation }: { segment: Segment;
         <div className="mt-2 flex flex-wrap gap-2 text-xs">
           <a
             href={openInClaudeUrl(conversation)}
-            title={`Opens the original chat in Claude. This topic starts at message #${segment.startTurn + 1}.`}
+            onClick={() => copyFind(segment.startTurn)}
+            title={`Opens the chat in Claude and copies a Ctrl+F search phrase for message #${segment.startTurn + 1}, where this topic starts`}
             className="rounded-full border border-border px-2.5 py-1 hover:bg-panel"
           >
-            Open in Claude ↗ <span className="text-muted">(starts at #{segment.startTurn + 1})</span>
+            Open in Claude ↗ <span className="text-muted">(copies search for #{segment.startTurn + 1})</span>
           </a>
           <a
             href={continueUrl}
@@ -263,22 +369,28 @@ function SegmentSection({ segment, segments, conversation }: { segment: Segment;
       </header>
       <div className="space-y-6">
         {turns.map((t) => (
-          <TurnView key={t.index} turn={t} />
+          <TurnView key={t.index} turn={t} conversationId={conversation.id} />
         ))}
       </div>
     </section>
   );
 }
 
-function TurnView({ turn }: { turn: Turn }) {
+function TurnView({ turn, conversationId }: { turn: Turn; conversationId: string }) {
   const tools = [...new Set(turn.tools)];
+  const shared = turn.attachments.filter((a) => a.kind !== "screenshot");
+  const screenshots = turn.attachments.filter((a) => a.kind === "screenshot");
   return (
     <article id={`turn-${turn.index}`} data-turn={turn.index} className="scroll-mt-14 space-y-3 md:scroll-mt-6">
-      <div className="ml-auto max-w-[90%] rounded-lg bg-accent-soft px-4 py-3 text-sm whitespace-pre-wrap break-words">
-        <div className="mb-1 font-mono text-[10px] text-muted">#{turn.index + 1} · You</div>
-        {turn.user}
+      <div className="ml-auto max-w-[90%] rounded-lg bg-accent-soft px-4 py-3 text-sm break-words">
+        <div className="mb-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted">
+          <span>#{turn.index + 1} · You</span>
+          <FindChip turn={turn} />
+        </div>
+        {turn.user && <div className="whitespace-pre-wrap">{turn.user}</div>}
+        <AttachmentList conversationId={conversationId} items={shared} />
       </div>
-      {(turn.assistant || tools.length > 0) && (
+      {(turn.assistant || tools.length > 0 || screenshots.length > 0) && (
         <div className="rounded-lg border border-border bg-panel px-4 py-3 text-sm break-words">
           <div className="mb-1 font-mono text-[10px] text-muted">Claude</div>
           {tools.length > 0 && (
@@ -291,6 +403,7 @@ function TurnView({ turn }: { turn: Turn }) {
           <div className="prose-chat">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.assistant}</ReactMarkdown>
           </div>
+          <ScreenshotStrip conversationId={conversationId} items={screenshots} />
         </div>
       )}
     </article>
@@ -329,4 +442,58 @@ function BuildTreeButton({ id, label, primary }: { id: string; label: string; pr
       {error && <p className="mt-2 text-xs whitespace-pre-wrap text-red-600">{error}</p>}
     </div>
   );
+}
+
+/** Small inline marker before a topic title: ★ for a unique idea, a colored dot for a recurring theme. */
+function ThemeMark({ theme }: { theme: ReturnType<ThemeModel["ofSegment"]["get"]> }) {
+  if (!theme) return null;
+  if (theme.unique) {
+    return (
+      <span title="Unique idea" className="mr-1 rounded bg-foreground px-0.5 align-[1px] text-[9px] font-semibold not-italic text-background">
+        ★
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`Theme: ${theme.name}`}
+      className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle"
+      style={{ backgroundColor: themeColor(theme) }}
+    />
+  );
+}
+
+/** Copies a prompt's Ctrl+F search phrase (see lib/findPhrase.ts). */
+const FindContext = createContext<(turnIndex: number) => void>(() => {});
+
+function FindChip({ turn }: { turn: Turn }) {
+  const copyFind = useContext(FindContext);
+  if (!turn.find) return null;
+  return (
+    <button
+      onClick={() => copyFind(turn.index)}
+      title="Copy a phrase that appears only once in this chat — paste it into Ctrl+F in Claude to find this message"
+      className="rounded-full border border-border bg-panel px-2 py-0.5 font-sans text-[11px] text-muted hover:border-accent hover:text-foreground"
+    >
+      🔍 “{turn.find.phrase}”{turn.find.messagesDown > 0 && ` +${turn.find.messagesDown}↓`}
+    </button>
+  );
+}
+
+/** Clipboard write with a fallback for browsers that block the async API. */
+function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+  } else legacyCopy(text);
+}
+
+function legacyCopy(text: string) {
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.style.position = "fixed";
+  el.style.opacity = "0";
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand("copy");
+  el.remove();
 }

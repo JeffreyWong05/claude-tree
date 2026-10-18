@@ -8,6 +8,17 @@
   --border: #e7e5e4;
   --accent: #c2410c;
   --accent-soft: #fff1e6;
+
+  /* Theme colors: validated default categorical palette, fixed order (light steps). */
+  --theme-1: #2a78d6; /* blue */
+  --theme-2: #eb6834; /* orange */
+  --theme-3: #1baf7a; /* aqua */
+  --theme-4: #eda100; /* yellow */
+  --theme-5: #e87ba4; /* magenta */
+  --theme-6: #008300; /* green */
+  --theme-7: #6250d6; /* violet */
+  --theme-8: #e34948; /* red */
+  --theme-other: #a8a29e;
 }
 
 @theme inline {
@@ -31,6 +42,17 @@
     --border: #292524;
     --accent: #fb923c;
     --accent-soft: #2a1a10;
+
+    /* Same hues, stepped for the dark surface. */
+    --theme-1: #3987e5;
+    --theme-2: #d95926;
+    --theme-3: #199e70;
+    --theme-4: #c98500;
+    --theme-5: #d55181;
+    --theme-6: #008300;
+    --theme-7: #9085e9;
+    --theme-8: #e66767;
+    --theme-other: #78716c;
   }
 }
 

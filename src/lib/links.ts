@@ -2,7 +2,7 @@ import type { Conversation, Segment } from "@/lib/types";
 
 /**
  * claude:// deep links handled by the Claude desktop app. Undocumented — found in the app's
- * URL handler (v2.26454). If links stop working after an app update, check here first.
+ * URL handler (v2.26454; re-checked v2.42304). If links stop working after an app update, check here first.
  *
  *   claude://code/continue?session=local_<id>   open an existing desktop Code session
  *   claude://resume?session=<cli-uuid>           import a CLI/terminal session and open it

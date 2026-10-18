@@ -16,11 +16,23 @@ Tick items off as they land; add dates when a milestone completes.
 - [x] One "unorganized" leaf per message the tree doesn't cover yet; removed only by a rebuild — 2026-10-07
 - [x] Organized-% meter + "Rebuild tree (organize N new)" — 2026-10-07
 - [x] Expand a topic to list its prompts as 2–4 word labels (Claude labels on rebuild, keyword fallback before) and jump to each — 2026-10-07
-- [ ] Graphical map view (React Flow) alongside the outline
+- [x] Diagram view: top-down tree (React Flow + d3-hierarchy tidy layout), zoom/pan/fit, minimap, click a node to read it — 2026-10-17
+- [x] Diagram nodes open to list their prompts (shared open/closed state with the sidebar); prompt → jump, "Read topic →" — 2026-10-18
+- [x] Theme colors: rebuild groups topics into named themes; recurring themes get palette colors, one-off themes are ★ "unique ideas"; spotlight a theme or all unique ideas (diagram + sidebar) — 2026-10-18
+- [ ] Optional: tentatively match unorganized messages to an existing theme locally (TF-IDF) before a rebuild
+- [ ] Diagram: many unorganized siblings make the tree very wide — consider grouping them into one collapsible node
 - [ ] Collapse/expand subtrees; collapse long Claude replies
 - [ ] Manual edits: rename a segment, move a split point, re-parent a segment (saved to the tree file)
 - [ ] Search across sessions and segment titles/summaries
 - [ ] "Where was I?" — one-paragraph recap of a branch's path from root
+
+## Milestone 2b — Attachments
+- [x] Pasted images inline (click to enlarge); images from Claude's tools collapsed per reply — 2026-10-08
+- [x] @-attached files as chips with previews: PDF, CSV table (first 200 rows), text/code — 2026-10-08
+- [ ] Verify how @-attached text/CSV/notebook files are stored (only a PDF example existed when built)
+- [ ] "Files touched" per topic (files Claude read/wrote/edited) with open-in-VS Code links
+- [ ] Notebook (.ipynb) preview: markdown, code, text + image outputs
+- [ ] Excel preview (first sheet) — needs a parser library
 
 ## Milestone 3 — More sources
 - [ ] Import claude.ai export (`conversations.json`, Settings → Privacy → Export data)
@@ -32,6 +44,7 @@ Tick items off as they land; add dates when a milestone completes.
 - [x] "Continue from this leaf": recap of root → segment pre-filled into a new Code session (`claude://code/new?q=`) — 2026-10-07
 - [ ] Test both links end-to-end from the browser (first click asks to allow opening Claude)
 - [ ] Scroll to the exact message when opening a chat (the app's link doesn't support this today)
+- [x] Workaround: per-prompt Ctrl+F "find phrase" (shortest run of the prompt's words unique in the chat); "Open in Claude" copies it; 🔍 chips in transcript and diagram — 2026-10-18
 - [ ] Live chat inside the app, context = path to current node
 
 ## Milestone 4b — Live updates

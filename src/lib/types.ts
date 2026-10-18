@@ -1,3 +1,17 @@
+/**
+ * A pointer to an image or file inside the transcript. Only metadata travels to the page;
+ * the bytes are fetched on demand from /api/conversations/[id]/attachments/[ref].
+ */
+export interface AttachmentRef {
+  ref: string;
+  /** image: pasted by the user · file: attached with @ · screenshot: returned by a tool Claude ran */
+  kind: "image" | "file" | "screenshot";
+  name: string;
+  mediaType: string;
+  sizeBytes: number;
+  preview: "image" | "pdf" | "csv" | "text" | "none";
+}
+
 /** One user prompt plus everything Claude said in reply, flattened to text. */
 export interface Turn {
   index: number;
@@ -6,6 +20,15 @@ export interface Turn {
   assistant: string;
   /** Names of tools Claude used while answering (Claude Code sessions). */
   tools: string[];
+  attachments: AttachmentRef[];
+  /** Ctrl+F search key for finding this prompt in the Claude app (computed per page load). */
+  find?: FindPhrase | null;
+}
+
+export interface FindPhrase {
+  phrase: string;
+  /** 0 when the phrase is in this prompt; N when it's in the prompt N messages earlier (this one is too short). */
+  messagesDown: number;
 }
 
 export interface Conversation {
@@ -52,6 +75,8 @@ export interface Segment {
   startTurn: number;
   /** Inclusive. */
   endTurn: number;
+  /** Index into TopicTree.themes: segments about the same underlying idea share a theme. */
+  theme?: number;
 }
 
 export interface TopicTree {
@@ -63,4 +88,6 @@ export interface TopicTree {
   segments: Segment[];
   /** 2-4 word label per prompt, indexed by turn. Missing in trees built before labels existed. */
   turnLabels?: string[];
+  /** Theme names (1-3 words). Missing in trees built before themes existed. */
+  themes?: string[];
 }

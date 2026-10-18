@@ -19,7 +19,10 @@ function renderTranscript(turns: Turn[]): string {
     const text = turns
       .map((t) => {
         const tools = t.tools.length ? ` (used tools: ${[...new Set(t.tools)].join(", ")})` : "";
-        return `[T${t.index}] USER: ${clip(t.user, userMax)}\n       CLAUDE${tools}: ${clip(t.assistant, claudeMax)}`;
+        // Only names of what the user shared — never the contents — so attachments don't add cost.
+        const shared = t.attachments.filter((a) => a.kind !== "screenshot").map((a) => a.name);
+        const attached = shared.length ? ` [attached: ${shared.join(", ")}]` : "";
+        return `[T${t.index}] USER${attached}: ${clip(t.user, userMax)}\n       CLAUDE${tools}: ${clip(t.assistant, claudeMax)}`;
       })
       .join("\n\n");
     if (text.length <= PROMPT_CHAR_BUDGET) return text;
@@ -43,11 +46,16 @@ Split the conversation into SEGMENTS: contiguous runs of turns about one topic. 
 - title: 2-6 words, specific (e.g. "JWT refresh tokens", not "Question about auth").
 - summary: one sentence on what was discussed or decided, so the user knows where they left off.
 
+Group the segments into THEMES: segments about the same underlying idea share a theme, even when they sit
+far apart in the tree (e.g. a "return" segment and the topic it returns to). Give each theme a 1-3 word name.
+A segment unlike every other segment gets a theme of its own — those are the conversation's unique ideas, so
+don't merge unrelated segments just to make bigger groups. Each segment's "theme" is an index into "themes".
+
 Also give every turn a LABEL: 2-4 words naming what the user asked or did in that turn, so it can be
 listed in a compact menu (e.g. "Add HP-cost cards", "Explain API keys", "Deploy to Netlify"). Exactly one label per turn, in order.
 
 Output exactly:
-{"segments":[{"start":0,"parent":null,"kind":"root","title":"...","summary":"..."}, ...],"labels":["...", ...]}
+{"segments":[{"start":0,"parent":null,"kind":"root","title":"...","summary":"...","theme":0}, ...],"themes":["...", ...],"labels":["...", ...]}
 "start" values must be strictly increasing turn indices. Each segment runs until the next segment's start.
 "labels" has exactly ${turns.length} entries.
 
@@ -57,6 +65,7 @@ ${renderTranscript(turns)}`;
 }
 
 interface RawSegment {
+  theme?: unknown;
   start?: unknown;
   parent?: unknown;
   kind?: unknown;
@@ -64,7 +73,7 @@ interface RawSegment {
   summary?: unknown;
 }
 
-function extractJson(reply: string): { segments?: unknown; labels?: unknown } {
+function extractJson(reply: string): { segments?: unknown; labels?: unknown; themes?: unknown } {
   try {
     return JSON.parse(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1));
   } catch {
@@ -80,6 +89,16 @@ export function parseLabels(reply: string, turns: Turn[]): string[] {
     const label = typeof labels[i] === "string" ? labels[i].trim() : "";
     return label && label.length <= 40 ? label : fallbackLabel(t.user);
   });
+}
+
+/** Theme names. Drops any segment theme index that doesn't point at a name. */
+export function parseThemes(reply: string, segments: Segment[]): string[] {
+  const raw = extractJson(reply).themes;
+  const names = (Array.isArray(raw) ? raw : []).map((t) => String(t).trim().slice(0, 40));
+  for (const seg of segments) {
+    if (seg.theme !== undefined && !(seg.theme >= 0 && seg.theme < names.length)) delete seg.theme;
+  }
+  return names;
 }
 
 /** Parses Claude's reply and repairs anything that would break the tree invariants. */
@@ -104,6 +123,7 @@ export function parseSegments(reply: string, turnCount: number): Segment[] {
       summary: String(r.summary ?? ""),
       startTurn: start,
       endTurn: turnCount - 1,
+      ...(Number.isInteger(Number(r.theme)) && r.theme !== null ? { theme: Number(r.theme) } : {}),
     });
     lastStart = start;
   }
@@ -119,12 +139,14 @@ export async function treeify(
   if (turns.length === 0) throw new Error("Conversation has no messages.");
   const model = process.env.CLAUDE_TREE_MODEL ?? "sonnet";
   const reply = await runner.complete(buildPrompt(turns), { model });
+  const segments = parseSegments(reply, turns.length);
   return {
     conversationId: conversation.id,
     generatedAt: new Date().toISOString(),
     turnCount: turns.length,
     model: `${runner.name}:${model}`,
-    segments: parseSegments(reply, turns.length),
+    segments,
+    themes: parseThemes(reply, segments),
     turnLabels: parseLabels(reply, turns),
   };
 }

@@ -48,3 +48,35 @@ the count doubles as a "how unorganized is this chat" meter. Cost while chatting
 The treeify prompt also asks for a 2–4 word label per turn (`turnLabels`), adding only ~5–10 output tokens per turn.
 Before a rebuild — and for trees built before labels existed — `fallbackLabel` picks the first meaningful words
 of the prompt (stopword filtering), which is free but less accurate.
+
+## 2026-10-08 — Attachments are loaded lazily by reference
+Transcripts embed images and @-attached files as base64 (a 100 KB PDF ≈ 135 KB of text). The parser records only
+a ref (`u<line>-<block>`, `t<line>-<block>-<item>`, `f<line>`) plus name/type/size; bytes are re-read from the
+transcript by `/api/conversations/[id]/attachments/[ref]` when the user opens them. Line numbers are stable because
+transcripts are append-only. Treeify sends only attachment names to Claude, so attachments add no rebuild cost.
+
+## 2026-10-17 — Diagram view: React Flow + d3-hierarchy
+React Flow gives pan/zoom/minimap/fit for free; d3-hierarchy's `tree()` computes a tidy top-down layout so
+branches don't overlap (React Flow has no layout of its own). The diagram is loaded with `next/dynamic` only when
+opened. The transcript stays mounted (hidden) in Diagram view; all navigation goes through `goTo()`, which renders
+the transcript synchronously (`flushSync`) before scrolling.
+
+## 2026-10-18 — Similarity = Claude-assigned themes; unique ideas get their own treatment
+Rebuild asks Claude to group segments into named themes (a few extra output tokens) — better than local text
+similarity, and the themes come with names. Colors follow the dataviz guidance:
+- The validated default 8-color categorical palette in fixed order (first appearance), light and dark steps.
+  More than 8 recurring themes fold into grey "Other"; hues are never generated.
+- Nodes in a tree sit next to any other color (an "all-pairs" layout), so color is never the only cue: every
+  node also shows its theme name, and the legend lists them.
+- One-off themes don't spend a palette color. They get a ★ "Unique idea" badge plus a heavy ink outline, so
+  they stand out instead of becoming one more hue. A spotlight (legend) fades everything but unique ideas or one theme.
+- Branch lines are neutral grey (the dash pattern carries branch type) and the "active topic" ring uses ink,
+  so the orange UI accent never reads as a theme color.
+
+## 2026-10-18 — Ctrl+F "find phrases" instead of message identifiers
+Past messages can't be tagged and the app's deep link can't scroll to a message, so each prompt gets a search
+key: the shortest run of its own words (4–8 words, one sentence, plain words only) that occurs exactly once in
+the normalized chat text (prompts + replies, markdown/tags stripped). Prompts too short to be unique ("Yes")
+point at the nearest earlier prompt's phrase plus "N messages down". Phrases are recomputed on every page load,
+so they stay unique as the chat grows. Known gap: text the app shows that we don't parse (tool output) could
+contain the phrase too. The Claude app has Electron find-in-page (checked in v2.42304).

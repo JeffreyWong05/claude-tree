@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Conversation, ConversationMeta, Turn } from "@/lib/types";
+import { extractAttachment, fileRef, imageRef, type FileAttachmentEntry } from "@/lib/attachments";
+import type { AttachmentRef, Conversation, ConversationMeta, Turn } from "@/lib/types";
 import { RUNNER_DIR_NAME } from "@/lib/runner";
 import { loadDesktopSessions } from "@/lib/sources/desktopSessions";
+import { findPhrases } from "@/lib/findPhrase";
 
 /** Claude Code stores one JSONL transcript per session under ~/.claude/projects/<project>/<id>.jsonl */
 export const PROJECTS_DIR =
@@ -41,7 +43,8 @@ function readTitle(file: string): string {
   const custom = [...raw.matchAll(/"customTitle":"((?:[^"\\]|\\.)*)"/g)].pop();
   if (custom) return JSON.parse(`"${custom[1]}"`).replace(/\s+/g, " ");
   const first = parseTurns(raw, 1)[0];
-  return first ? first.user.replace(/\s+/g, " ").slice(0, 80) : "(empty session)";
+  if (!first) return "(empty session)";
+  return first.user ? first.user.replace(/\s+/g, " ").slice(0, 80) : "(image prompt)";
 }
 
 export function listConversations(): ConversationMeta[] {
@@ -69,6 +72,8 @@ export function loadConversation(id: string): Conversation | null {
   const file = findTranscript(id);
   if (!file) return null;
   const raw = fs.readFileSync(file, "utf8");
+  const turns = parseTurns(raw);
+  findPhrases(turns).forEach((f, i) => (turns[i].find = f));
   const cwd = raw.match(/"cwd":"((?:[^"\\]|\\.)*)"/)?.[1];
   return {
     id,
@@ -79,19 +84,28 @@ export function loadConversation(id: string): Conversation | null {
     cwd: cwd ? JSON.parse(`"${cwd}"`) : undefined,
     transcriptPath: file,
     desktop: loadDesktopSessions().get(id),
-    turns: parseTurns(raw),
+    turns,
   };
 }
 
 // ---------------------------------------------------------------------------
 
-type Block = { type: string; text?: string; name?: string };
+type Block = {
+  type: string;
+  text?: string;
+  name?: string;
+  id?: string;
+  tool_use_id?: string;
+  source?: Parameters<typeof imageRef>[1];
+  content?: string | Block[];
+};
 interface Entry {
   type: string;
   isSidechain?: boolean;
   isMeta?: boolean;
   timestamp?: string;
   message?: { content: string | Block[] };
+  attachment?: FileAttachmentEntry;
 }
 
 /** Turns raw user content into the prompt text a human typed, or null if it isn't a real prompt. */
@@ -102,9 +116,8 @@ function promptText(content: string | Block[]): string | null {
   } else {
     // Tool results come back as "user" messages but are part of Claude's work, not a new prompt.
     if (content.some((b) => b.type === "tool_result")) return null;
-    text = content
-      .map((b) => (b.type === "text" ? b.text ?? "" : b.type === "image" ? "[image]" : ""))
-      .join("\n");
+    // Images are kept as attachments, not as text.
+    text = content.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("\n");
   }
   if (text.startsWith("<local-command")) return null;
   const command = text.match(/<command-name>(.*?)<\/command-name>/s);
@@ -118,7 +131,10 @@ function promptText(content: string | Block[]): string | null {
 
 export function parseTurns(raw: string, limit = Infinity): Turn[] {
   const turns: Turn[] = [];
-  for (const line of raw.split("\n")) {
+  const toolNames = new Map<string, string>(); // tool_use id -> tool name, to label screenshots
+  const lines = raw.split("\n"); // Line numbers are part of attachment refs — index the unfiltered split.
+  for (let ln = 0; ln < lines.length; ln++) {
+    const line = lines[ln];
     if (!line.trim()) continue;
     let entry: Entry;
     try {
@@ -126,18 +142,39 @@ export function parseTurns(raw: string, limit = Infinity): Turn[] {
     } catch {
       continue;
     }
+    const current = turns[turns.length - 1];
+
+    // Files attached with @ are stored as their own entry right after the prompt.
+    if (entry.type === "attachment") {
+      const ref = entry.attachment && fileRef(ln, entry.attachment);
+      if (ref && current) current.attachments.push(ref);
+      continue;
+    }
     if (entry.isSidechain || entry.isMeta || !entry.message) continue;
+    const content = entry.message.content;
 
     if (entry.type === "user") {
-      const text = promptText(entry.message.content);
-      if (text === null) continue;
+      // Tool results: part of Claude's work, but they may carry screenshots worth keeping.
+      if (Array.isArray(content) && content.some((b) => b.type === "tool_result")) {
+        if (current) current.attachments.push(...toolResultImages(content, ln, toolNames));
+        continue;
+      }
+      const text = promptText(content);
+      const images = Array.isArray(content)
+        ? content.flatMap((b, i) =>
+            b.type === "image" && b.source ? [imageRef(`u${ln}-${i}`, b.source, "image", "Pasted image")] : [],
+          )
+        : [];
+      const attachments = images.filter((a): a is AttachmentRef => a !== null);
+      if (text === null && attachments.length === 0) continue;
       if (turns.length >= limit) break;
       turns.push({
         index: turns.length,
         timestamp: entry.timestamp ?? "",
-        user: text,
+        user: text ?? "",
         assistant: "",
         tools: [],
+        attachments,
       });
     } else if (entry.type === "assistant" && turns.length) {
       const turn = turns[turns.length - 1];
@@ -151,9 +188,36 @@ export function parseTurns(raw: string, limit = Infinity): Turn[] {
           turn.assistant += (turn.assistant ? "\n\n" : "") + block.text.trim();
         } else if (block.type === "tool_use" && block.name) {
           turn.tools.push(block.name);
+          if (block.id) toolNames.set(block.id, block.name);
         }
       }
     }
   }
   return turns;
+}
+
+/** "mcp__Claude_Browser__computer" -> "computer" */
+function shortToolName(name: string | undefined): string {
+  return name ? name.split("__").pop()! : "tool";
+}
+
+function toolResultImages(content: Block[], ln: number, toolNames: Map<string, string>): AttachmentRef[] {
+  const refs: AttachmentRef[] = [];
+  content.forEach((block, b) => {
+    if (block.type !== "tool_result" || !Array.isArray(block.content)) return;
+    const tool = shortToolName(block.tool_use_id ? toolNames.get(block.tool_use_id) : undefined);
+    block.content.forEach((item, i) => {
+      if (item.type !== "image" || !item.source) return;
+      const name = tool === "Read" ? "Image Claude opened" : `Screenshot (${tool})`;
+      const ref = imageRef(`t${ln}-${b}-${i}`, item.source, "screenshot", name);
+      if (ref) refs.push(ref);
+    });
+  });
+  return refs;
+}
+
+/** Bytes of one attachment, re-read from the transcript on demand. */
+export function loadAttachment(id: string, ref: string) {
+  const file = findTranscript(id);
+  return file ? extractAttachment(fs.readFileSync(file, "utf8"), ref) : null;
 }
