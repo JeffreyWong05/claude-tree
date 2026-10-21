@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { listConversations } from "@/lib/sources/claudeCode";
 import { listTreeIds } from "@/lib/store";
 import { getSetupStatus } from "@/lib/setup";
+import { ServerControls } from "@/components/ServerControls";
 
 export default function Home() {
   return (
@@ -18,6 +19,7 @@ export default function Home() {
       <Suspense fallback={<p className="mt-8 text-sm text-muted">Loading sessions…</p>}>
         <SessionList />
       </Suspense>
+      <ServerControls />
     </main>
   );
 }

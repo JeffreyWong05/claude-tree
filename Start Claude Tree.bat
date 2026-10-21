@@ -1,5 +1,5 @@
 @echo off
-rem Double-click to start Claude Tree. Keep the window open while you use the app; close it to stop.
+rem Double-click to start Claude Tree. It runs in the background; this window closes by itself.
 title Claude Tree
 cd /d "%~dp0"
 
@@ -14,8 +14,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-node scripts\launch.mjs
+node scripts\launch.mjs %*
 if errorlevel 1 (
   echo.
   pause
+  exit /b 1
 )
+rem Leave the result on screen briefly, then close.
+timeout /t 3 >nul

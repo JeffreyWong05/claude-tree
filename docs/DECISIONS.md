@@ -89,3 +89,19 @@ themselves), a Claude Code check, then `next start` on port 3456 and open the br
 Production mode, not `next dev`: faster pages, and it avoids the dev server's crash-after-many-reloads issue.
 Port 3456 (not 3000) so it doesn't collide with other dev servers. `.gitattributes` pins CRLF for `.bat` and LF
 for `.command`, and the `.command` file is committed executable (mode 100755).
+
+## 2026-10-20 — Background server with in-app on/off; local-only binding
+Starting Claude Tree shouldn't need a terminal. The launcher now prepares the app in its (brief) window, then
+spawns `next start` detached and hidden (`windowsHide`), records the PID in `data/server.pid`, logs to
+`data/server.log`, and exits. Next is run via `node node_modules/next/dist/bin/next` (not npm) so the PID is the
+server itself. Off: the in-app button (`POST /api/server`, then `process.exit`) or `launch.mjs --stop`
+(`taskkill /t` on Windows, process-group kill elsewhere). Start-at-login is an in-app switch: a minimized
+Startup-folder shortcut on Windows, a LaunchAgent on Mac (untested). Idle cost ~85 MB RAM.
+- The server binds **127.0.0.1** only — before this, `next start` also listened on the LAN, exposing chats to
+  anyone on the same Wi-Fi.
+- `POST /api/server` requires an `x-claude-tree: 1` header and a same-origin `Sec-Fetch-Site`, so another website
+  open in the browser can't turn the server off or edit login items (a custom header forces a CORS preflight,
+  which is never approved).
+- The off button appears only when the launcher started the server (`CLAUDE_TREE_MANAGED=1`), never under `npm run dev`.
+- Build output is hidden unless the build fails: it prints deployment-only file-tracing warnings that would
+  alarm non-developers.

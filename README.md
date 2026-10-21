@@ -54,7 +54,8 @@ to find, like your Documents folder. *(If you use Git: `git clone` works too.)*
 The first start takes a few minutes while it installs and prepares everything. After that it opens in about
 5 seconds. Your browser opens Claude Tree at **http://localhost:3456** automatically.
 
-**Keep the small black window open while you use Claude Tree — close it to stop.**
+Claude Tree then **runs quietly in the background** — the small window closes by itself, and you never need a
+terminal. It uses about 85 MB of memory, and it only accepts connections from your own computer.
 
 The home page shows a checklist if anything from steps 1–2 is missing, with instructions to fix it.
 
@@ -62,8 +63,12 @@ The home page shows a checklist if anything from steps 1–2 is missing, with in
 
 ## Everyday use
 
-**Start:** double-click `Start Claude Tree` (or a shortcut to it — see below). If it's already running, it just
-opens your browser.
+| | How |
+|---|---|
+| **Turn on** | Double-click `Start Claude Tree` (or its shortcut). If it's already on, this just opens it. |
+| **Open** | Go to **http://localhost:3456** (bookmark it), or use the installed app window — see below. |
+| **Turn off** | Click **Turn off Claude Tree** at the bottom of the home page, or double-click `Stop Claude Tree`. |
+| **Always on** | Tick **Start Claude Tree automatically when I log in** at the bottom of the home page. |
 
 **In the app:**
 1. Pick a chat from the list.
@@ -78,10 +83,8 @@ opens your browser.
 - **Dock (Mac):** drag `Start Claude Tree.command` to the right side of your Dock.
 - **Its own app window:** while Claude Tree is open in **Chrome or Edge**, click the install icon at the right of
   the address bar (or menu **⋮ → Cast, save, and share → Install page as app**). Claude Tree then gets its own
-  window and Start-menu/Dock icon. The start file still needs to be running for the window to load.
-- **Start automatically when you log in (optional):**
-  - Windows: press Win+R, type `shell:startup`, press Enter, and put a shortcut to `Start Claude Tree.bat` in that folder.
-  - Mac: System Settings → General → Login Items → **+** → choose `Start Claude Tree.command`.
+  window and Start-menu/Dock icon. Claude Tree needs to be turned on for the window to load — with
+  "start automatically when I log in" ticked, it always is.
 
 ### Updating
 
@@ -96,7 +99,8 @@ to keep the trees you've already built.
 | Problem | Fix |
 |---|---|
 | The black window says Node.js is missing | Install it (step 1), then double-click the start file again. |
-| Home page says "Install Claude Code" | Do step 2, then close the black window and start Claude Tree again. |
+| Home page says "Install Claude Code" | Do step 2, then turn Claude Tree off and on again. |
+| The page won't load | Claude Tree is off — double-click `Start Claude Tree`. If it still fails, see `data/server.log`. |
 | "Build topic tree" shows an error about `claude` | Open a terminal, run `claude`, and make sure you're signed in. |
 | The window says the port is in use | Another program uses port 3456. Close it, or set a different port (see below). |
 | Mac: "permission denied" | In Terminal, run `chmod +x ` (with a space), drag the `.command` file into the window, press Enter. |
@@ -109,7 +113,9 @@ to keep the trees you've already built.
 ```bash
 npm install
 npm run dev          # http://localhost:3000 with hot reload
-npm run launch       # what the start files run: install → build if needed → start on :3456
+npm run launch       # what the start files run: install → build if needed → start in the background on :3456
+npm run launch -- --stop        # stop the background server
+npm run launch -- --foreground  # run it in this terminal instead (logs visible, Ctrl+C to stop)
 npm run treeify -- list
 npm run treeify -- <session-id>
 ```

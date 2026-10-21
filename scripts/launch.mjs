@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * One-step launcher used by "Start Claude Tree" (Windows .bat / Mac .command):
- *   1. installs dependencies on first run (or after an update changed them)
- *   2. builds the app when the code is newer than the last build
- *   3. checks that Claude Code is installed
- *   4. starts the app and opens it in the browser
- * If Claude Tree is already running, it just opens the browser.
+ * Launcher behind "Start Claude Tree" / "Stop Claude Tree" (Windows .bat, Mac .command).
+ *
+ *   node scripts/launch.mjs              install/build if needed, start the server in the background, open the browser
+ *   node scripts/launch.mjs --no-browser same, without opening the browser (used when starting at login)
+ *   node scripts/launch.mjs --stop       stop the background server
+ *   node scripts/launch.mjs --foreground run the server in this window instead (for debugging)
+ *
+ * The server only listens on this computer (127.0.0.1), so your chats aren't reachable from your network.
  * Plain JavaScript (no TypeScript) so it runs before anything is installed.
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -16,8 +18,14 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(root);
 
+const args = new Set(process.argv.slice(2));
 const PORT = Number(process.env.PORT ?? 3456);
-const URL = `http://localhost:${PORT}`;
+const HOST = "127.0.0.1";
+const BROWSER_URL = `http://localhost:${PORT}`;
+const HEALTH_URL = `http://${HOST}:${PORT}/api/health`;
+const DATA_DIR = path.join(root, "data");
+const PID_FILE = path.join(DATA_DIR, "server.pid");
+const LOG_FILE = path.join(DATA_DIR, "server.log");
 const isWin = process.platform === "win32";
 
 const say = (msg = "") => console.log(msg);
@@ -26,9 +34,13 @@ function fail(msg) {
   process.exit(1);
 }
 
-function run(cmd, args) {
-  const result = spawnSync(cmd, args, { stdio: "inherit", shell: isWin });
-  if (result.status !== 0) fail(`"${cmd} ${args.join(" ")}" failed. Scroll up for details.`);
+/** Runs a command. Quiet mode hides its output unless it fails (the build prints developer-only warnings). */
+function run(cmd, cmdArgs, { quiet = false } = {}) {
+  const result = spawnSync(cmd, cmdArgs, { stdio: quiet ? "pipe" : "inherit", shell: isWin, encoding: "utf8" });
+  if (result.status !== 0) {
+    if (quiet) say(`${result.stdout ?? ""}${result.stderr ?? ""}`);
+    fail(`"${cmd} ${cmdArgs.join(" ")}" failed. Scroll up for details.`);
+  }
 }
 
 function mtime(p) {
@@ -51,73 +63,133 @@ function newestIn(dir) {
 
 async function isRunning() {
   try {
-    const res = await fetch(`${URL}/api/health`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(2000) });
     return res.ok && (await res.json()).app === "claude-tree";
   } catch {
     return false;
   }
 }
 
-function openBrowser() {
-  if (process.env.CLAUDE_TREE_NO_BROWSER) return; // for testing the launcher
-  const [cmd, args] = isWin ? ["cmd", ["/c", "start", "", URL]] : process.platform === "darwin" ? ["open", [URL]] : ["xdg-open", [URL]];
-  spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
+async function waitFor(condition, seconds) {
+  for (let i = 0; i < seconds * 2; i++) {
+    if (await condition()) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
 }
 
-async function main() {
-  say("──────────────────────────────");
-  say("  Claude Tree");
-  say("──────────────────────────────");
+function openBrowser() {
+  if (args.has("--no-browser") || process.env.CLAUDE_TREE_NO_BROWSER) return;
+  const [cmd, cmdArgs] = isWin
+    ? ["cmd", ["/c", "start", "", BROWSER_URL]]
+    : process.platform === "darwin"
+      ? ["open", [BROWSER_URL]]
+      : ["xdg-open", [BROWSER_URL]];
+  spawn(cmd, cmdArgs, { stdio: "ignore", detached: true }).unref();
+}
 
+function readPid() {
+  const pid = Number(fs.existsSync(PID_FILE) ? fs.readFileSync(PID_FILE, "utf8").trim() : NaN);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+async function stop() {
+  const pid = readPid();
+  if (!pid && !(await isRunning())) {
+    say("Claude Tree isn't running.");
+    return;
+  }
+  if (pid) {
+    if (isWin) spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+    else {
+      try {
+        process.kill(-pid); // the whole process group started in the background
+      } catch {
+        try {
+          process.kill(pid);
+        } catch {}
+      }
+    }
+  }
+  fs.rmSync(PID_FILE, { force: true });
+  if (await waitFor(async () => !(await isRunning()), 10)) say("✓ Claude Tree stopped.");
+  else fail(`Something is still answering on port ${PORT}. It may have been started another way — close that window or restart your computer.`);
+}
+
+/** Install and build only when needed, so everyday starts take seconds. */
+function prepare() {
   const major = Number(process.versions.node.split(".")[0]);
   if (major < 20) fail(`Node.js ${process.versions.node} is too old. Install the LTS version from https://nodejs.org and try again.`);
 
-  if (await isRunning()) {
-    say(`Claude Tree is already running — opening ${URL}`);
-    openBrowser();
-    return;
-  }
-
-  // 1. Dependencies: first run, or package-lock.json changed since the last install.
   if (!fs.existsSync("node_modules") || mtime("package-lock.json") > mtime("node_modules/.package-lock.json")) {
     say("\n▸ Installing (first run only — this can take a few minutes)…");
     run("npm", ["install", "--no-audit", "--no-fund"]);
   }
 
-  // 2. Build: missing, or any app code is newer than the last build (e.g. after downloading an update).
   const sources = Math.max(newestIn("src"), newestIn("public"), mtime("package.json"), mtime("next.config.ts"), mtime("tsconfig.json"));
   if (mtime(".next/BUILD_ID") < sources) {
     say("\n▸ Preparing the app (about a minute)…");
-    run("npm", ["run", "build"]);
+    run("npm", ["run", "build"], { quiet: true });
+    say("✓ Ready");
   }
 
-  // 3. Claude Code: viewing works without it, but building trees needs it.
   const claude = spawnSync("claude", ["--version"], { encoding: "utf8", shell: isWin, timeout: 15000 });
-  if (claude.status === 0) {
-    say(`\n✓ Claude Code found (${claude.stdout.trim()})`);
-  } else {
+  if (claude.status === 0) say(`✓ Claude Code found (${claude.stdout.trim()})`);
+  else {
     say("\n⚠ Claude Code isn't installed (or isn't on your PATH).");
     say("  You can still browse chats, but building trees needs it. To install:");
     say("    npm install -g @anthropic-ai/claude-code");
     say("  then run `claude` once to sign in, and restart Claude Tree.");
   }
-
-  // 4. Start, then open the browser once the app answers.
-  say(`\n▸ Starting at ${URL} …`);
-  const server = spawn("npm", ["run", "start", "--", "--port", String(PORT)], { stdio: ["ignore", "pipe", "inherit"], shell: isWin });
-  server.stdout.on("data", () => {}); // keep the pipe drained; Next's startup banner isn't useful to non-developers
-  server.on("exit", (code) => {
-    if (code) fail(`The app stopped unexpectedly (exit code ${code}). Is port ${PORT} used by another program? Set PORT to change it.`);
-    process.exit(0);
-  });
-
-  for (let i = 0; i < 60 && !(await isRunning()); i++) await new Promise((r) => setTimeout(r, 1000));
-  if (!(await isRunning())) fail("The app didn't start within a minute. Scroll up for errors.");
-
-  openBrowser();
-  say("\n✓ Claude Tree is running.");
-  say(`  Open ${URL} any time while this window is open.`);
-  say("  Keep this window open while you use it — close it to stop Claude Tree.");
 }
 
-main();
+function nextArgs() {
+  // Run Next directly (not through npm) so the saved PID is the server itself and Stop can end it.
+  return [path.join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", String(PORT), "-H", HOST];
+}
+
+async function start() {
+  say("──────────────────────────────");
+  say("  Claude Tree");
+  say("──────────────────────────────");
+
+  if (await isRunning()) {
+    say(`Claude Tree is already running — opening ${BROWSER_URL}`);
+    openBrowser();
+    return;
+  }
+
+  prepare();
+  // CLAUDE_TREE_MANAGED lets the app show its Stop button and start-at-login switch.
+  const env = { ...process.env, CLAUDE_TREE_MANAGED: "1", NODE_ENV: "production" };
+
+  if (args.has("--foreground")) {
+    say(`\n▸ Running at ${BROWSER_URL} in this window — press Ctrl+C to stop.`);
+    const server = spawn(process.execPath, nextArgs(), { stdio: "inherit", env });
+    if (await waitFor(isRunning, 60)) openBrowser();
+    server.on("exit", (code) => process.exit(code ?? 0));
+    return;
+  }
+
+  say(`\n▸ Starting in the background…`);
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const log = fs.openSync(LOG_FILE, "a");
+  fs.writeSync(log, `\n--- started ${new Date().toISOString()} ---\n`);
+  const server = spawn(process.execPath, nextArgs(), {
+    detached: true, // keeps running after this window closes
+    windowsHide: true, // no console window on Windows
+    stdio: ["ignore", log, log],
+    env,
+  });
+  fs.writeFileSync(PID_FILE, String(server.pid));
+  server.unref();
+
+  if (!(await waitFor(isRunning, 60))) fail(`The app didn't start within a minute. Details are in ${LOG_FILE}`);
+  openBrowser();
+  say(`\n✓ Claude Tree is running at ${BROWSER_URL}`);
+  say("  It keeps running in the background — you can close this window.");
+  say("  To turn it off: the Stop button in the app, or double-click “Stop Claude Tree”.");
+}
+
+if (args.has("--stop")) await stop();
+else await start();
