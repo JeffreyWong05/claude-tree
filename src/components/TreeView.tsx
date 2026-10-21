@@ -67,6 +67,7 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
 
   const labelOf = useCallback((i: number) => labelFor(conversation.turns[i], tree), [conversation, tree]);
   const themes = useMemo(() => buildThemes(segments, tree?.themes), [segments, tree]);
+  const findOf = useCallback((i: number) => conversation.turns[i]?.find ?? null, [conversation]);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** Copy a prompt's Ctrl+F search phrase, for finding it in the Claude app. */
@@ -199,6 +200,8 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
               themes={themes}
               spotlight={spotlight}
               onSpotlight={setSpotlight}
+              findOf={findOf}
+              openUrl={openInClaudeUrl(conversation)}
             />
           </div>
         )}

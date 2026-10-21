@@ -45,6 +45,7 @@ Tick items off as they land; add dates when a milestone completes.
 - [ ] Test both links end-to-end from the browser (first click asks to allow opening Claude)
 - [ ] Scroll to the exact message when opening a chat (the app's link doesn't support this today)
 - [x] Workaround: per-prompt Ctrl+F "find phrase" (shortest run of the prompt's words unique in the chat); "Open in Claude" copies it; 🔍 chips in transcript and diagram — 2026-10-18
+- [x] Diagram "Find in Claude" panel (follows the clicked topic: each prompt's phrase + Copy, Open in Claude) and a legend switch to print phrases inside opened nodes; legend and panel fold up on small windows — 2026-10-21
 - [ ] Live chat inside the app, context = path to current node
 
 ## Milestone 4b — Live updates
@@ -57,5 +58,6 @@ Tick items off as they land; add dates when a milestone completes.
 - [x] Double-click launchers (`Start Claude Tree.bat` / `.command`) → `scripts/launch.mjs`: install, build when changed, check Claude Code, start on :3456, open browser — 2026-10-18
 - [x] Home-page setup checklist (`/api/health`), installable app manifest + icons, non-coder README — 2026-10-18
 - [x] Published: https://github.com/JeffreyWong05/claude-tree (public) — 2026-10-18
-- [ ] Test the Mac launcher on a real Mac (written blind: Gatekeeper, PATH from Finder, nvm/Homebrew)
+- [x] Background server: launcher starts it hidden and exits; in-app "Turn off" + `Stop Claude Tree`; in-app "start when I log in" switch; binds 127.0.0.1 only — 2026-10-20
+- [ ] Test the Mac launcher on a real Mac and its login item (written blind: Gatekeeper, PATH from Finder, nvm/Homebrew, LaunchAgent)
 - [ ] Sample data / demo mode for people without Claude Code chats yet

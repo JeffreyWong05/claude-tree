@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   Background,
   Controls,
@@ -16,12 +16,14 @@ import {
 import "@xyflow/react/dist/style.css";
 import { hierarchy, tree } from "d3-hierarchy";
 import { isDimmed, themeColor, type Spotlight, type ThemeInfo, type ThemeModel } from "@/lib/themes";
-import type { Segment } from "@/lib/types";
+import type { FindPhrase, Segment } from "@/lib/types";
 
 const NODE_W = 210;
 const NODE_H = 72;
 /** Extra height of an opened node: one row per prompt plus the "Read topic" row. */
 const PROMPT_ROW_H = 22;
+/** Row height when each prompt also shows its Ctrl+F search phrase underneath. */
+const PROMPT_ROW_WITH_PHRASE_H = 38;
 const OPEN_EXTRA_H = 40;
 const H_GAP = 36;
 const V_GAP = 70;
@@ -43,7 +45,7 @@ const EDGE_DASH: Record<Segment["kind"], string | undefined> = {
   unsorted: "3 3",
 };
 
-type Prompt = { index: number; label: string };
+type Prompt = { index: number; label: string; find: FindPhrase | null };
 type TopicData = {
   segment: Segment | null;
   active: boolean;
@@ -54,6 +56,7 @@ type TopicData = {
   onCopyFind: (turnIndex: number) => void;
   theme?: ThemeInfo;
   dim: boolean;
+  showPhrases: boolean;
 };
 type TopicNode = Node<TopicData, "topic">;
 
@@ -72,18 +75,21 @@ interface LayoutInput {
   onCopyFind: (turnIndex: number) => void;
   themes: ThemeModel | null;
   spotlight: Spotlight;
+  findOf: (turnIndex: number) => FindPhrase | null;
+  showPhrases: boolean;
 }
 
-function heightOf(segment: Segment | null, expanded: Set<number>): number {
+function heightOf(segment: Segment | null, expanded: Set<number>, showPhrases: boolean): number {
   if (!segment || !expanded.has(segment.id)) return NODE_H;
-  return NODE_H + OPEN_EXTRA_H + (segment.endTurn - segment.startTurn + 1) * PROMPT_ROW_H;
+  const row = showPhrases ? PROMPT_ROW_WITH_PHRASE_H : PROMPT_ROW_H;
+  return NODE_H + OPEN_EXTRA_H + (segment.endTurn - segment.startTurn + 1) * row;
 }
 
 /**
  * Tidy top-down tree layout (Reingold–Tilford via d3-hierarchy) for x positions.
  * Rows are spaced by the tallest node at each depth, so opened nodes never overlap the row below.
  */
-function layout({ segments, active, activeTurn, expanded, labelOf, onPick, onCopyFind, themes, spotlight }: LayoutInput): { nodes: TopicNode[]; edges: Edge[] } {
+function layout({ segments, active, activeTurn, expanded, labelOf, onPick, onCopyFind, themes, spotlight, findOf, showPhrases }: LayoutInput): { nodes: TopicNode[]; edges: Edge[] } {
   const byId = new Map<number, LayoutNode>(segments.map((s) => [s.id, { segment: s, children: [] }]));
   const roots: LayoutNode[] = [];
   for (const s of segments) {
@@ -97,7 +103,7 @@ function layout({ segments, active, activeTurn, expanded, labelOf, onPick, onCop
   tree<LayoutNode>().nodeSize([NODE_W + H_GAP, NODE_H + V_GAP])(root);
 
   const rowHeight: number[] = [];
-  for (const d of root.descendants()) rowHeight[d.depth] = Math.max(rowHeight[d.depth] ?? 0, heightOf(d.data.segment, expanded));
+  for (const d of root.descendants()) rowHeight[d.depth] = Math.max(rowHeight[d.depth] ?? 0, heightOf(d.data.segment, expanded, showPhrases));
   const rowY: number[] = [0];
   for (let i = 1; i < rowHeight.length; i++) rowY[i] = rowY[i - 1] + rowHeight[i - 1] + V_GAP;
 
@@ -115,18 +121,19 @@ function layout({ segments, active, activeTurn, expanded, labelOf, onPick, onCop
         active: seg?.id === active,
         open,
         prompts: open
-          ? Array.from({ length: seg.endTurn - seg.startTurn + 1 }, (_, k) => seg.startTurn + k).map((i) => ({ index: i, label: labelOf(i) }))
+          ? Array.from({ length: seg.endTurn - seg.startTurn + 1 }, (_, k) => seg.startTurn + k).map((i) => ({ index: i, label: labelOf(i), find: findOf(i) }))
           : [],
         activeTurn,
         onPick,
         onCopyFind,
         theme,
         dim: !!seg && isDimmed(spotlight, theme),
+        showPhrases,
       },
       // Known sizes: the nodes are read-only (no onNodesChange), so React Flow never stores measured
       // dimensions on them, and the minimap skips nodes without a size.
       initialWidth: NODE_W,
-      initialHeight: heightOf(seg, expanded),
+      initialHeight: heightOf(seg, expanded, showPhrases),
       draggable: false,
       connectable: false,
     };
@@ -206,18 +213,30 @@ function TopicCard({ data }: NodeProps<TopicNode>) {
       {data.open && (
         <div className="mt-2 border-t border-dashed border-border pt-1">
           {data.prompts.map((p) => (
-            <div key={p.index} style={{ height: PROMPT_ROW_H }} className="flex items-center">
+            <div
+              key={p.index}
+              style={{ height: data.showPhrases ? PROMPT_ROW_WITH_PHRASE_H : PROMPT_ROW_H }}
+              className="flex items-center"
+              title={p.find ? `Ctrl+F in Claude: “${p.find.phrase}”${p.find.messagesDown ? `, then ${p.find.messagesDown} down` : ""}` : undefined}
+            >
               <button
                 onClick={(e) => {
                   e.stopPropagation(); // don't collapse the node
                   data.onPick(`turn-${p.index}`);
                 }}
-                className={`flex h-full min-w-0 flex-1 items-center gap-1.5 rounded px-1 text-left text-xs not-italic ${
+                className={`flex h-full min-w-0 flex-1 flex-col justify-center rounded px-1 text-left text-xs not-italic ${
                   p.index === data.activeTurn ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{p.label}</span>
-                <span className="shrink-0 font-mono text-[10px]">#{p.index + 1}</span>
+                <span className="flex w-full items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate">{p.label}</span>
+                  <span className="shrink-0 font-mono text-[10px]">#{p.index + 1}</span>
+                </span>
+                {data.showPhrases && p.find && (
+                  <span className="w-full truncate font-mono text-[10px] text-muted">
+                    “{p.find.phrase}”{p.find.messagesDown > 0 && ` +${p.find.messagesDown}↓`}
+                  </span>
+                )}
               </button>
               <button
                 onClick={(e) => {
@@ -250,6 +269,20 @@ function TopicCard({ data }: NodeProps<TopicNode>) {
 
 const nodeTypes = { topic: TopicCard };
 
+/** True on windows wide enough to show the legend and Find panel open without covering the tree. */
+function useWide(): boolean {
+  const query = "(min-width: 1000px)";
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+    () => true,
+  );
+}
+
 export default function TreeDiagram({
   segments,
   active,
@@ -262,6 +295,8 @@ export default function TreeDiagram({
   themes,
   spotlight,
   onSpotlight,
+  findOf,
+  openUrl,
 }: {
   segments: Segment[];
   active: number;
@@ -276,17 +311,30 @@ export default function TreeDiagram({
   themes: ThemeModel | null;
   spotlight: Spotlight;
   onSpotlight: (s: Spotlight) => void;
+  /** Ctrl+F search phrase for a prompt (see lib/findPhrase.ts). */
+  findOf: (turnIndex: number) => FindPhrase | null;
+  /** claude:// link that opens this chat in the Claude app. */
+  openUrl: string;
 }) {
+  const [showPhrases, setShowPhrases] = useState(false);
+  const wide = useWide();
+  /** The topic whose prompts the "Find in Claude" panel lists: the last one clicked, else the one being read. */
+  const [selected, setSelected] = useState<number | null>(null);
   const { nodes, edges } = useMemo(
-    () => layout({ segments, active, activeTurn, expanded, labelOf, onPick, onCopyFind, themes, spotlight }),
-    [segments, active, activeTurn, expanded, labelOf, onPick, onCopyFind, themes, spotlight],
+    () => layout({ segments, active, activeTurn, expanded, labelOf, onPick, onCopyFind, themes, spotlight, findOf, showPhrases }),
+    [segments, active, activeTurn, expanded, labelOf, onPick, onCopyFind, themes, spotlight, findOf, showPhrases],
   );
+  const panelSegment = segments.find((s) => s.id === (selected ?? active));
   return (
     <ReactFlow
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      onNodeClick={(_, node) => node.data.segment && onToggle(node.data.segment.id)}
+      onNodeClick={(_, node) => {
+        if (!node.data.segment) return;
+        onToggle(node.data.segment.id);
+        setSelected(node.data.segment.id);
+      }}
       nodesDraggable={false}
       nodesConnectable={false}
       fitView
@@ -297,7 +345,7 @@ export default function TreeDiagram({
       proOptions={{ hideAttribution: true }}
     >
       <Background gap={24} size={1} />
-      <Controls showInteractive={false} />
+      <Controls showInteractive={false} position="top-left" />
       <MiniMap
         pannable
         zoomable
@@ -307,18 +355,45 @@ export default function TreeDiagram({
         className="hidden sm:block"
         style={{ backgroundColor: "var(--panel)" }}
       />
-      <Panel position="top-right" className="max-h-[70%] w-56 overflow-y-auto rounded-md border border-border bg-panel/95 px-3 py-2 text-xs">
-        <ThemeLegend themes={themes} spotlight={spotlight} onSpotlight={onSpotlight} />
-        <details className="mt-2 border-t border-border pt-1.5">
-          <summary className="cursor-pointer font-medium select-none">Branch lines</summary>
-          <div className="mt-1 space-y-0.5 text-muted">
-            <div>→ ── continue</div>
-            <div>↳ – – tangent</div>
-            <div>↩ · · · return</div>
-            <div>○ - - - unorganized</div>
+      <Panel position="top-right" className="max-h-[70%] w-56 max-w-[calc(100%-4rem)] overflow-y-auto rounded-md border border-border bg-panel/95 px-3 py-2 text-xs">
+        {/* Open by default on wide windows; folded to one line on small ones so the tree stays visible. */}
+        <details key={`legend-${wide}`} open={wide}>
+          <summary className="cursor-pointer font-medium select-none">Legend &amp; options</summary>
+          <div className="mt-1.5">
+            <ThemeLegend themes={themes} spotlight={spotlight} onSpotlight={onSpotlight} />
+            <label className="mt-2 flex cursor-pointer items-start gap-1.5 border-t border-border pt-1.5">
+              <input
+                type="checkbox"
+                checked={showPhrases}
+                onChange={(e) => setShowPhrases(e.target.checked)}
+                className="mt-0.5 accent-[var(--accent)]"
+              />
+              <span>
+                <span className="font-medium">🔍 Show Ctrl+F phrases</span>
+                <span className="block text-muted">under each prompt in opened topics</span>
+              </span>
+            </label>
+            <details className="mt-2 border-t border-border pt-1.5">
+              <summary className="cursor-pointer font-medium select-none">Branch lines</summary>
+              <div className="mt-1 space-y-0.5 text-muted">
+                <div>→ ── continue</div>
+                <div>↳ – – tangent</div>
+                <div>↩ · · · return</div>
+                <div>○ - - - unorganized</div>
+              </div>
+            </details>
+            <div className="mt-1.5 text-muted">Scroll to zoom · drag to pan · click a topic to see its prompts</div>
           </div>
         </details>
-        <div className="mt-1.5 text-muted">Scroll to zoom · drag to pan · click a topic to see its prompts</div>
+      </Panel>
+      <Panel position="bottom-left" className="max-h-[45%] w-72 max-w-[calc(100%-2rem)] overflow-y-auto rounded-md border border-border bg-panel/95 px-3 py-2 text-xs">
+        <details key={`find-${wide}`} open={wide}>
+          <summary className="cursor-pointer truncate select-none">
+            <span className="font-medium">🔍 Find in Claude</span>
+            {panelSegment && <span className="text-muted"> · {panelSegment.title}</span>}
+          </summary>
+          <FindPanel segment={panelSegment} labelOf={labelOf} findOf={findOf} onCopyFind={onCopyFind} openUrl={openUrl} />
+        </details>
       </Panel>
     </ReactFlow>
   );
@@ -365,6 +440,69 @@ function ThemeLegend({
           <span className="font-mono text-muted">{t.count}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Ctrl+F phrases for one topic's prompts, for finding them in the Claude app (which can't link to a message).
+ * Follows the last topic clicked in the diagram.
+ */
+function FindPanel({
+  segment,
+  labelOf,
+  findOf,
+  onCopyFind,
+  openUrl,
+}: {
+  segment: Segment | undefined;
+  labelOf: (turnIndex: number) => string;
+  findOf: (turnIndex: number) => FindPhrase | null;
+  onCopyFind: (turnIndex: number) => void;
+  openUrl: string;
+}) {
+  if (!segment) return <p className="text-muted">Click a topic to see Ctrl+F phrases for finding its prompts in Claude.</p>;
+  const turns = Array.from({ length: segment.endTurn - segment.startTurn + 1 }, (_, k) => segment.startTurn + k);
+  return (
+    <div>
+      <ul className="mt-1.5 space-y-1">
+        {turns.map((i) => {
+          const find = findOf(i);
+          return (
+            <li key={i} className="flex items-center gap-2">
+              <span className="w-7 shrink-0 font-mono text-[10px] text-muted">#{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate">{labelOf(i)}</div>
+                <div className="truncate font-mono text-[10px] text-muted">
+                  {find ? (
+                    <>
+                      “{find.phrase}”{find.messagesDown > 0 && ` +${find.messagesDown}↓`}
+                    </>
+                  ) : (
+                    "no unique phrase"
+                  )}
+                </div>
+              </div>
+              {find && (
+                <button
+                  onClick={() => onCopyFind(i)}
+                  className="shrink-0 rounded border border-border px-1.5 py-0.5 hover:border-accent hover:text-foreground"
+                >
+                  Copy
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <a
+        href={openUrl}
+        onClick={() => onCopyFind(segment.startTurn)}
+        className="mt-2 block rounded bg-accent px-2 py-1 text-center font-medium text-white hover:opacity-90"
+      >
+        Open in Claude ↗ <span className="font-normal opacity-80">(copies #{segment.startTurn + 1})</span>
+      </a>
+      <p className="mt-1 text-muted">In Claude: press Ctrl+F and paste. “+1↓” means scroll down one message.</p>
     </div>
   );
 }
