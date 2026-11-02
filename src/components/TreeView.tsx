@@ -8,6 +8,9 @@ import { flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { labelFor } from "@/lib/labels";
+import { LiveBadge, useLiveUpdates } from "@/components/LiveUpdates";
+import { SearchPanel } from "@/components/SearchPanel";
+import { SummaryView } from "@/components/SummaryView";
 import { AttachmentList, ScreenshotStrip } from "@/components/Attachments";
 import { buildRecap, newSessionUrl, openInClaudeUrl } from "@/lib/links";
 import { buildThemes, isDimmed, themeColor, type Spotlight, type ThemeModel } from "@/lib/themes";
@@ -18,6 +21,15 @@ const TreeDiagram = dynamic(() => import("@/components/TreeDiagram"), {
   ssr: false,
   loading: () => <p className="p-6 text-sm text-muted">Loading diagram…</p>,
 });
+
+type View = "transcript" | "diagram" | "summary";
+/** A place to return to with Back. */
+interface Place {
+  view: View;
+  scrollY: number;
+  label: string;
+}
+const MAX_BACK = 50;
 
 const KIND_ICON: Record<Segment["kind"], string> = {
   root: "◆",
@@ -53,18 +65,80 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
   const [active, setActive] = useState({ segment: 0, turn: 0 });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [mapOpen, setMapOpen] = useState(false);
-  const [view, setView] = useState<"transcript" | "diagram">("transcript");
-  /** Any navigation from the map or diagram: show the transcript, then scroll to the target (e.g. "seg-3"). */
-  const goTo = useCallback((target: string) => {
-    // Render the transcript synchronously so the target element is visible before scrolling.
-    flushSync(() => {
-      setMapOpen(false);
-      setView("transcript");
-    });
-    document.getElementById(target)?.scrollIntoView();
-    history.replaceState(null, "", `#${target}`);
-  }, []);
+  const [view, setView] = useState<View>("transcript");
 
+  /**
+   * Back: every jump remembers where you were (view + scroll position), so you can return after
+   * following a search result, summary link, diagram node or topic.
+   */
+  const [backStack, setBackStack] = useState<Place[]>([]);
+  const here = useRef<() => Place>(() => ({ view: "transcript", scrollY: 0, label: "start" }));
+  const remember = useCallback(() => setBackStack((stack) => [...stack.slice(-(MAX_BACK - 1)), here.current()]), []);
+
+  /** Any navigation from the map, diagram, search or summary: show the transcript, then scroll to the target (e.g. "seg-3"). */
+  const goTo = useCallback(
+    (target: string) => {
+      remember();
+      // Render the transcript synchronously so the target element is visible before scrolling.
+      flushSync(() => {
+        setMapOpen(false);
+        setView("transcript");
+      });
+      document.getElementById(target)?.scrollIntoView();
+      history.replaceState(null, "", `#${target}`);
+    },
+    [remember],
+  );
+
+  /** Switch to another view (tab), remembering the current place. */
+  const switchView = useCallback(
+    (next: View) => {
+      remember();
+      flushSync(() => {
+        setMapOpen(false);
+        setView(next);
+      });
+      window.scrollTo(0, 0);
+    },
+    [remember],
+  );
+
+  const back = useCallback(() => {
+    const place = backStack.at(-1);
+    if (!place) return;
+    setBackStack((stack) => stack.slice(0, -1));
+    flushSync(() => setView(place.view));
+    window.scrollTo(0, place.scrollY);
+  }, [backStack]);
+
+  // Backspace = Back, unless you're typing somewhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Backspace" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+      if (!backStack.length) return;
+      e.preventDefault();
+      back();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [back, backStack.length]);
+
+  // New prompts in Claude Code show up as unorganized leaves within seconds (no Claude tokens used).
+  const live = useLiveUpdates(conversation.id);
+  /** Search results: jump to a message and briefly outline it so it's easy to spot. */
+  const jumpToMessage = useCallback(
+    (turnIndex: number) => {
+      goTo(`turn-${turnIndex}`);
+      const el = document.getElementById(`turn-${turnIndex}`);
+      if (!el) return;
+      el.classList.remove("search-flash");
+      void el.offsetWidth; // restart the animation if it's already running
+      el.classList.add("search-flash");
+    },
+    [goTo],
+  );
   const labelOf = useCallback((i: number) => labelFor(conversation.turns[i], tree), [conversation, tree]);
   const themes = useMemo(() => buildThemes(segments, tree?.themes), [segments, tree]);
   const findOf = useCallback((i: number) => conversation.turns[i]?.find ?? null, [conversation]);
@@ -114,6 +188,14 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
     [],
   );
 
+  useEffect(() => {
+    here.current = () => ({
+      view,
+      scrollY: window.scrollY,
+      label: view === "summary" ? "Summary" : view === "diagram" ? "Diagram" : `#${active.turn + 1}`,
+    });
+  }, [view, active.turn]);
+
   const total = conversation.turns.length;
   const unsorted = segments.filter((s) => s.kind === "unsorted").length;
 
@@ -129,54 +211,59 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
         </div>
         <h2 className="text-sm font-semibold leading-snug">{conversation.title}</h2>
         <p className="mt-1 text-xs text-muted">
-          {total} messages · {segments.length - unsorted} topic{segments.length - unsorted === 1 ? "" : "s"}
+          {total} messages · {segments.length - unsorted} topic{segments.length - unsorted === 1 ? "" : "s"} · <LiveBadge live={live} />
         </p>
-        <OrganizedMeter total={total} unsorted={unsorted} />
-        <div className="mt-3 grid grid-cols-2 rounded-md border border-border p-0.5 text-sm" role="tablist">
-          {(["transcript", "diagram"] as const).map((v) => (
-            <button
-              key={v}
-              role="tab"
-              aria-selected={view === v}
-              onClick={() => {
-                if (v === "transcript") goTo(`turn-${active.turn}`); // back to where you were reading
-                else {
-                  setView(v);
-                  setMapOpen(false);
-                }
-              }}
-              className={`rounded px-2 py-1 ${view === v ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
-            >
-              {v === "transcript" ? "📜 Transcript" : "🌳 Diagram"}
-            </button>
-          ))}
-        </div>
-        <a
-          href={openInClaudeUrl(conversation)}
-          onClick={() => copyFind(active.turn)}
-          title={`Opens this chat in Claude and copies a Ctrl+F search phrase for message #${active.turn + 1}`}
-          className="mt-3 block w-full rounded-md border border-border px-3 py-1.5 text-center text-sm hover:bg-background"
-        >
-          Open chat in Claude ↗
-        </a>
-        <BuildTreeButton
-          id={conversation.id}
-          label={tree ? (unsorted ? `Rebuild tree (organize ${unsorted} new)` : "Rebuild tree") : "Build topic tree"}
-          primary={unsorted > 0}
-        />
-        <nav className="mt-4">
-          <TopicNodes
-            segments={segments}
-            parent={null}
-            active={active}
-            expanded={expanded}
-            toggle={toggle}
-            labelOf={labelOf}
-            onPick={goTo}
-            themes={themes}
-            spotlight={spotlight}
+        <SearchPanel turns={conversation.turns} segments={segments} labelOf={labelOf} onJump={jumpToMessage}>
+          <OrganizedMeter total={total} unsorted={unsorted} />
+          <div className="mt-3 grid grid-cols-3 rounded-md border border-border p-0.5 text-sm" role="tablist">
+            {(["transcript", "diagram", "summary"] as const).map((v) => (
+              <button
+                key={v}
+                role="tab"
+                aria-selected={view === v}
+                onClick={() => {
+                  if (v === view) return;
+                  if (v === "transcript") goTo(`turn-${active.turn}`); // back to where you were reading
+                  else switchView(v);
+                }}
+                className={`rounded px-1 py-1 text-[13px] whitespace-nowrap ${view === v ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+              >
+                {v === "transcript" ? "📜 Read" : v === "diagram" ? "🌳 Diagram" : "📝 Summary"}
+              </button>
+            ))}
+          </div>
+          <a
+            href={openInClaudeUrl(conversation)}
+            onClick={() => copyFind(active.turn)}
+            title={`Opens this chat in Claude and copies a Ctrl+F search phrase for message #${active.turn + 1}`}
+            className="mt-3 block w-full rounded-md border border-border px-3 py-1.5 text-center text-sm hover:bg-background"
+          >
+            Open chat in Claude ↗
+          </a>
+          <BuildTreeButton
+            id={conversation.id}
+            label={tree ? (unsorted ? `Rebuild tree (organize ${unsorted} new)` : "Rebuild tree") : "Build topic tree"}
+            primary={unsorted > 0}
           />
-        </nav>
+          {tree?.usage && (
+            <p className="mt-1 text-[11px] text-muted" title="Input (incl. cached) + output tokens reported by Claude Code for the last build">
+              Last build used {formatTokens(tree.usage)} tokens
+            </p>
+          )}
+          <nav className="mt-4">
+            <TopicNodes
+              segments={segments}
+              parent={null}
+              active={active}
+              expanded={expanded}
+              toggle={toggle}
+              labelOf={labelOf}
+              onPick={goTo}
+              themes={themes}
+              spotlight={spotlight}
+            />
+          </nav>
+        </SearchPanel>
       </aside>
 
       <main className="min-w-0 flex-1 px-4 py-6 md:px-10">
@@ -186,6 +273,27 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
         >
           ☰ Map · {segments[active.segment]?.title}
         </button>
+        {backStack.length > 0 && (
+          <div className="sticky top-2 z-20 mb-3 flex justify-end">
+            <button
+              onClick={back}
+              title="Go back to where you were (Backspace)"
+              className="rounded-full border border-border bg-panel px-3 py-1 text-sm shadow-sm hover:border-accent"
+            >
+              ← Back to {backStack.at(-1)!.label}
+            </button>
+          </div>
+        )}
+        {view === "summary" && (
+          <SummaryView
+            conversation={conversation}
+            tree={tree}
+            segments={segments}
+            themes={themes}
+            labelOf={labelOf}
+            onGo={goTo}
+          />
+        )}
         {view === "diagram" && (
           <div className="sticky top-4 h-[calc(100vh-6rem)] overflow-hidden rounded-lg border border-border bg-panel md:h-[calc(100vh-3rem)]">
             <TreeDiagram
@@ -206,7 +314,7 @@ export function TreeView({ conversation, tree }: { conversation: Conversation; t
           </div>
         )}
         {/* Kept mounted (just hidden) in Diagram view so reading position and scroll tracking survive. */}
-        <div className={`mx-auto max-w-3xl space-y-12 ${view === "diagram" ? "hidden" : ""}`}>
+        <div className={`mx-auto max-w-3xl space-y-12 ${view !== "transcript" ? "hidden" : ""}`}>
           {segments.map((s) => (
             <SegmentSection key={s.id} segment={s} segments={segments} conversation={conversation} />
           ))}
@@ -499,4 +607,9 @@ function legacyCopy(text: string) {
   el.select();
   document.execCommand("copy");
   el.remove();
+}
+
+function formatTokens(u: { input: number; output: number; cacheRead: number; cacheWrite: number }): string {
+  const total = u.input + u.output + u.cacheRead + u.cacheWrite;
+  return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
 }

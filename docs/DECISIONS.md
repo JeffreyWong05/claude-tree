@@ -105,3 +105,39 @@ Startup-folder shortcut on Windows, a LaunchAgent on Mac (untested). Idle cost ~
 - The off button appears only when the launcher started the server (`CLAUDE_TREE_MANAGED=1`), never under `npm run dev`.
 - Build output is hidden unless the build fails: it prints deployment-only file-tracing warnings that would
   alarm non-developers.
+
+## 2026-10-21 — Lean `claude -p` calls
+Measured: a default `claude -p` call carries ~38k tokens of Claude Code's own system prompt, tool definitions and
+MCP tools (12.9k cache write + 25.3k cache read for a 4-token reply). Sorting a transcript needs none of it, so the
+runner passes `--system-prompt "<one line>" --tools "" --strict-mcp-config --no-session-persistence`: overhead
+drops to ~1.3k tokens, and a full rebuild of a 1-prompt chat measured 2.9k tokens total. `--bare` would go further
+but requires an API key (ignores subscription OAuth). On Windows `claude` is an npm `.cmd` shim that needs
+`shell: true`, which joins args unquoted — the runner quotes args itself so `""` and the prompt survive.
+Each saved tree records `usage`, shown in the sidebar, so the cost is visible rather than estimated.
+
+## 2026-10-21 — Live leaves via file watching, not live sorting
+New prompts should appear immediately, but sorting each one with Claude costs ~2–2.5k tokens per prompt. So the
+free half ships: `/api/watch` streams Server-Sent Events from `fs.watch` (OS notifications — idle cost is zero),
+batched 1.5 s on the server; the page calls `router.refresh()` at most every 3 s and only while visible, keeping
+client state (opened topics, diagram zoom, scroll). New prompts appear as unorganized leaves; Rebuild still sorts
+them. Live sorting stays an optional future switch.
+
+## 2026-10-22 — Message search runs locally, keyed on answer shape + keywords
+Requests like "messages with a chart with links" or "step-by-step directions" describe what an answer looks like,
+not its words, so `lib/search.ts` detects shapes per message (markdown tables, numbered lists, links, code blocks,
+headings, bullets, images/files from attachments) and maps everyday words to them ("chart" → table,
+"directions" → steps). Shape words are requirements; other words are keywords (word-prefix match, light stemming,
+IDF-weighted, your own prompt text weighted above Claude's, all words required); "quoted" text is an exact phrase.
+The parsed query is shown ("Looking for 📊 table/chart + 🔗 links") so the interpretation isn't a black box.
+No Claude tokens and ~2 ms per query on a 30-message chat. Semantic "Ask Claude" search is left as an optional
+later add-on because each query would cost roughly a rebuild's worth of tokens.
+
+## 2026-11-02 — Summary written during rebuild; Back is an in-app stack
+The written overview is one more field in the rebuild reply ("overview", markdown with [text](#seg-N) links), so it
+costs no extra call or overhead — measured +~320 output tokens on a small chat — and is grounded in the full
+transcript rather than just topic titles. Links to non-existent segments are unwrapped at parse time. The topic
+outline and "not yet summarized" list are built from saved data, so the Summary view opens instantly and older
+trees still get a useful page.
+Back is an in-app stack of {view, scrollY, label}, pushed by every `goTo`/view switch (cap 50), popped by the
+"← Back to …" button or Backspace (ignored while typing). Browser history wasn't used: hash jumps already use
+`replaceState`, and pushing entries would make the browser's own Back step through every jump before leaving.

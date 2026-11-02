@@ -23,7 +23,11 @@ Tick items off as they land; add dates when a milestone completes.
 - [ ] Diagram: many unorganized siblings make the tree very wide — consider grouping them into one collapsible node
 - [ ] Collapse/expand subtrees; collapse long Claude replies
 - [ ] Manual edits: rename a segment, move a split point, re-parent a segment (saved to the tree file)
-- [ ] Search across sessions and segment titles/summaries
+- [x] In-chat message search (sidebar, Discord-style): answer-shape words (chart/table, links, step-by-step, code, screenshot, file) + keywords + "phrases"; results stay listed, Show context, Enter/Shift+Enter, Ctrl+F — local, no tokens — 2026-10-22
+- [ ] Search across all chats from the home page
+- [ ] Optional "Ask Claude" search for vague meaning-based queries (~size of a rebuild per query, e.g. ~9k tokens for a 30-message chat)
+- [x] Summary view: Claude-written overview with inline topic links (written during rebuild, ~+300 output tokens, no extra call) + free topic outline + "not yet summarized" list — 2026-11-02
+- [x] Back: every jump remembers view + scroll; "← Back to …" button and Backspace — 2026-11-02
 - [ ] "Where was I?" — one-paragraph recap of a branch's path from root
 
 ## Milestone 2b — Attachments
@@ -49,8 +53,10 @@ Tick items off as they land; add dates when a milestone completes.
 - [ ] Live chat inside the app, context = path to current node
 
 ## Milestone 4b — Live updates
-- [ ] Watch transcript files (`fs.watch`) and mark trees stale automatically (free)
-- [ ] Incremental classify: send only the new turn + current segment list instead of rebuilding
+- [x] Watch transcript files (`fs.watch` → SSE `/api/watch`): new prompts appear as unorganized leaves within ~2–5 s, home list updates too; no Claude tokens — 2026-10-21
+- [x] Lean `claude -p` (own system prompt, no tools, no MCP): rebuild overhead ~38k → ~1.3k tokens; each tree records the tokens it used — 2026-10-21
+- [ ] Optional live sorting (off by default): place each new prompt with Haiku, ~2–2.5k tokens per prompt (measured overhead + estimate)
+- [ ] Incremental "organize new" rebuild: send only new turns + current topic list instead of the whole chat
 - [ ] Optional Claude Code `Stop` hook to trigger the incremental update after each reply
 
 ## Milestone 5 — Shareable

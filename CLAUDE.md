@@ -15,11 +15,13 @@ Start of every session: read `docs/ROADMAP.md` (what's next) and `docs/DECISIONS
 2. **Treeify (on demand, not per message)**: `src/lib/treeify.ts` sends a clipped transcript to Claude
    once and gets back segments `{start, parent, kind, title, summary}`. `parseSegments` repairs bad output.
 3. **Runner**: `src/lib/runner.ts` — `ClaudeRunner` interface. Only implementation today is `cliRunner`
-   (`claude -p`, uses the user's Claude subscription, no API key). Add an API-key runner behind the same interface.
+   (`claude -p`, uses the user's Claude subscription, no API key) with lean flags that cut Claude Code's
+   per-call overhead from ~38k to ~1.3k tokens (see DECISIONS). Add an API-key runner behind the same interface.
 4. **Store**: trees are cached in `data/trees/<id>.json` (gitignored — contains chat content).
 5. **Deep links**: `src/lib/links.ts` builds `claude://` links (open chat / continue from leaf); desktop session
    ids come from `src/lib/sources/desktopSessions.ts`. Undocumented app internals — see docs/DECISIONS.md.
 6. **UI**: `/` lists sessions; `/c/[id]` shows the topic map (sidebar) + transcript grouped by segment.
+7. **Live updates**: `/api/watch` streams file-change events (SSE); `useLiveUpdates` refreshes the page. No tokens.
 
 ## Commands
 

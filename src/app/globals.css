@@ -74,3 +74,10 @@ body {
 .prose-chat th, .prose-chat td { border: 1px solid var(--border); padding: 0.3em 0.6em; text-align: left; }
 .prose-chat a { color: var(--accent); text-decoration: underline; }
 .prose-chat blockquote { border-left: 3px solid var(--border); padding-left: 0.8em; color: var(--muted); }
+
+/* Outline a message briefly after jumping to it from search. */
+@keyframes search-flash {
+  0%, 60% { box-shadow: 0 0 0 3px var(--accent); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+.search-flash { border-radius: 0.75rem; animation: search-flash 1.8s ease-out; }

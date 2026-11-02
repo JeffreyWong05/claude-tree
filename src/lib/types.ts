@@ -90,4 +90,8 @@ export interface TopicTree {
   turnLabels?: string[];
   /** Theme names (1-3 words). Missing in trees built before themes existed. */
   themes?: string[];
+  /** Written summary of the chat (markdown, links like "#seg-3"). Missing in trees built before summaries existed. */
+  overview?: string;
+  /** Tokens the rebuild used, as reported by Claude Code. */
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }

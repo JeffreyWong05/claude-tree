@@ -54,8 +54,13 @@ don't merge unrelated segments just to make bigger groups. Each segment's "theme
 Also give every turn a LABEL: 2-4 words naming what the user asked or did in that turn, so it can be
 listed in a compact menu (e.g. "Add HP-cost cards", "Explain API keys", "Deploy to Netlify"). Exactly one label per turn, in order.
 
+Finally write an OVERVIEW of the whole conversation for someone returning to it later: 120-250 words of plain
+prose (short bullet points allowed). Cover the goal, what was decided or built, open questions, and where things
+were left. Link each topic where you mention it, using markdown links whose target is "#seg-" plus the segment's
+index, e.g. [deployed to Netlify](#seg-3). Link every segment at least once. No headings.
+
 Output exactly:
-{"segments":[{"start":0,"parent":null,"kind":"root","title":"...","summary":"...","theme":0}, ...],"themes":["...", ...],"labels":["...", ...]}
+{"segments":[{"start":0,"parent":null,"kind":"root","title":"...","summary":"...","theme":0}, ...],"themes":["...", ...],"labels":["...", ...],"overview":"..."}
 "start" values must be strictly increasing turn indices. Each segment runs until the next segment's start.
 "labels" has exactly ${turns.length} entries.
 
@@ -73,7 +78,7 @@ interface RawSegment {
   summary?: unknown;
 }
 
-function extractJson(reply: string): { segments?: unknown; labels?: unknown; themes?: unknown } {
+function extractJson(reply: string): { segments?: unknown; labels?: unknown; themes?: unknown; overview?: unknown } {
   try {
     return JSON.parse(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1));
   } catch {
@@ -89,6 +94,18 @@ export function parseLabels(reply: string, turns: Turn[]): string[] {
     const label = typeof labels[i] === "string" ? labels[i].trim() : "";
     return label && label.length <= 40 ? label : fallbackLabel(t.user);
   });
+}
+
+/**
+ * The written overview. Links to segments that don't exist are unwrapped to plain text, so every
+ * remaining "#seg-N" link lands on a real topic.
+ */
+export function parseOverview(reply: string, segmentCount: number): string | undefined {
+  const raw = extractJson(reply).overview;
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  return raw.trim().replace(/\[([^\]]+)\]\(#seg-(\d+)\)/g, (link, text: string, n: string) =>
+    Number(n) < segmentCount ? link : text,
+  );
 }
 
 /** Theme names. Drops any segment theme index that doesn't point at a name. */
@@ -138,7 +155,7 @@ export async function treeify(
   const { turns } = conversation;
   if (turns.length === 0) throw new Error("Conversation has no messages.");
   const model = process.env.CLAUDE_TREE_MODEL ?? "sonnet";
-  const reply = await runner.complete(buildPrompt(turns), { model });
+  const { text: reply, usage } = await runner.complete(buildPrompt(turns), { model });
   const segments = parseSegments(reply, turns.length);
   return {
     conversationId: conversation.id,
@@ -148,5 +165,7 @@ export async function treeify(
     segments,
     themes: parseThemes(reply, segments),
     turnLabels: parseLabels(reply, turns),
+    overview: parseOverview(reply, segments.length),
+    usage,
   };
 }

@@ -34,7 +34,9 @@ async function main() {
     const depth = depthOf(s.id, tree.segments.map((x) => x.parent));
     console.log(`${"  ".repeat(depth)}- [${s.kind}] ${s.title}  (T${s.startTurn}-T${s.endTurn})`);
   }
-  console.log(`\nSaved to data/trees/${tree.conversationId}.json`);
+  const u = tree.usage;
+  if (u) console.log(`\nTokens: ${u.input} input + ${u.cacheWrite} cache write + ${u.cacheRead} cache read + ${u.output} output`);
+  console.log(`Saved to data/trees/${tree.conversationId}.json`);
 }
 
 function depthOf(id: number, parents: (number | null)[]): number {
