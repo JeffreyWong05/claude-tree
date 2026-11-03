@@ -68,7 +68,8 @@ The home page shows a checklist if anything from steps 1–2 is missing, with in
 | **Turn on** | Double-click `Start Claude Tree` (or its shortcut). If it's already on, this just opens it. |
 | **Open** | Go to **http://localhost:3456** (bookmark it), or use the installed app window — see below. |
 | **Turn off** | Click **Turn off Claude Tree** at the bottom of the home page, or double-click `Stop Claude Tree`. |
-| **Always on** | Tick **Start Claude Tree automatically when I log in** at the bottom of the home page. |
+| **Always on** (recommended) | Tick **Start Claude Tree automatically when I log in** at the bottom of the home page. It then comes back by itself after your computer restarts, and keeps running through sleep. |
+| **Restart / update** | Click **Restart** at the bottom of the home page — a few seconds. When an update has been downloaded it reads **Update & restart** (about a minute). |
 
 **In the app:**
 1. Pick a chat from the list.
@@ -88,8 +89,8 @@ The home page shows a checklist if anything from steps 1–2 is missing, with in
 
 ### Updating
 
-Download the new ZIP (or run `git pull`) and start Claude Tree as usual — it notices the update and prepares it
-automatically. If you downloaded a ZIP into a new folder, copy the old folder's **`data`** folder into the new one
+Download the new ZIP (or run `git pull`). If Claude Tree is running, the home page shows **Update & restart** —
+click it. Otherwise just start Claude Tree as usual; it notices the update and prepares it automatically. If you downloaded a ZIP into a new folder, copy the old folder's **`data`** folder into the new one
 to keep the trees you've already built.
 
 ---

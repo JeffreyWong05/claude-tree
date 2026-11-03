@@ -5,7 +5,10 @@
  *   node scripts/launch.mjs              install/build if needed, start the server in the background, open the browser
  *   node scripts/launch.mjs --no-browser same, without opening the browser (used when starting at login)
  *   node scripts/launch.mjs --stop       stop the background server
+ *   node scripts/launch.mjs --restart    stop, apply any update (rebuild), start again — used by the in-app Restart button
  *   node scripts/launch.mjs --foreground run the server in this window instead (for debugging)
+ *
+ * The everyday app is built into its own folder (.next-app), so developer builds (.next) can't break it.
  *
  * The server only listens on this computer (127.0.0.1), so your chats aren't reachable from your network.
  * Plain JavaScript (no TypeScript) so it runs before anything is installed.
@@ -27,6 +30,11 @@ const DATA_DIR = path.join(root, "data");
 const PID_FILE = path.join(DATA_DIR, "server.pid");
 const LOG_FILE = path.join(DATA_DIR, "server.log");
 const isWin = process.platform === "win32";
+/** Build folder for the everyday app (see next.config.ts). */
+const APP_DIST = ".next-app";
+const APP_ENV = { ...process.env, CLAUDE_TREE_DIST: APP_DIST };
+/** Keep the log from growing forever on an always-on server. */
+const LOG_MAX_BYTES = 1_000_000;
 
 const say = (msg = "") => console.log(msg);
 function fail(msg) {
@@ -35,8 +43,9 @@ function fail(msg) {
 }
 
 /** Runs a command. Quiet mode hides its output unless it fails (the build prints developer-only warnings). */
-function run(cmd, cmdArgs, { quiet = false } = {}) {
-  const result = spawnSync(cmd, cmdArgs, { stdio: quiet ? "pipe" : "inherit", shell: isWin, encoding: "utf8" });
+function run(cmd, cmdArgs, { quiet = false, env = process.env } = {}) {
+  // windowsHide: when the in-app Restart runs this without a console, npm/cmd mustn't pop up windows.
+  const result = spawnSync(cmd, cmdArgs, { stdio: quiet ? "pipe" : "inherit", shell: isWin, encoding: "utf8", env, windowsHide: true });
   if (result.status !== 0) {
     if (quiet) say(`${result.stdout ?? ""}${result.stderr ?? ""}`);
     fail(`"${cmd} ${cmdArgs.join(" ")}" failed. Scroll up for details.`);
@@ -100,7 +109,7 @@ async function stop() {
     return;
   }
   if (pid) {
-    if (isWin) spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+    if (isWin) spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
     else {
       try {
         process.kill(-pid); // the whole process group started in the background
@@ -127,13 +136,13 @@ function prepare() {
   }
 
   const sources = Math.max(newestIn("src"), newestIn("public"), mtime("package.json"), mtime("next.config.ts"), mtime("tsconfig.json"));
-  if (mtime(".next/BUILD_ID") < sources) {
+  if (mtime(path.join(APP_DIST, "BUILD_ID")) < sources) {
     say("\n▸ Preparing the app (about a minute)…");
-    run("npm", ["run", "build"], { quiet: true });
+    run("npm", ["run", "build"], { quiet: true, env: APP_ENV });
     say("✓ Ready");
   }
 
-  const claude = spawnSync("claude", ["--version"], { encoding: "utf8", shell: isWin, timeout: 15000 });
+  const claude = spawnSync("claude", ["--version"], { encoding: "utf8", shell: isWin, timeout: 15000, windowsHide: true });
   if (claude.status === 0) say(`✓ Claude Code found (${claude.stdout.trim()})`);
   else {
     say("\n⚠ Claude Code isn't installed (or isn't on your PATH).");
@@ -160,8 +169,8 @@ async function start() {
   }
 
   prepare();
-  // CLAUDE_TREE_MANAGED lets the app show its Stop button and start-at-login switch.
-  const env = { ...process.env, CLAUDE_TREE_MANAGED: "1", NODE_ENV: "production" };
+  // CLAUDE_TREE_MANAGED lets the app show its Stop/Restart buttons and start-at-login switch.
+  const env = { ...APP_ENV, CLAUDE_TREE_MANAGED: "1", NODE_ENV: "production" };
 
   if (args.has("--foreground")) {
     say(`\n▸ Running at ${BROWSER_URL} in this window — press Ctrl+C to stop.`);
@@ -173,6 +182,7 @@ async function start() {
 
   say(`\n▸ Starting in the background…`);
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  trimLog();
   const log = fs.openSync(LOG_FILE, "a");
   fs.writeSync(log, `\n--- started ${new Date().toISOString()} ---\n`);
   const server = spawn(process.execPath, nextArgs(), {
@@ -191,5 +201,25 @@ async function start() {
   say("  To turn it off: the Stop button in the app, or double-click “Stop Claude Tree”.");
 }
 
+/** Keep only the most recent part of a large log. */
+function trimLog() {
+  try {
+    if (fs.statSync(LOG_FILE).size <= LOG_MAX_BYTES) return;
+    const text = fs.readFileSync(LOG_FILE, "utf8");
+    fs.writeFileSync(LOG_FILE, `[older log entries removed]\n${text.slice(-LOG_MAX_BYTES / 4)}`);
+  } catch {
+    // no log yet
+  }
+}
+
 if (args.has("--stop")) await stop();
-else await start();
+else if (args.has("--restart")) {
+  // Stop first: rebuilding under a running server would break the pages it's serving.
+  if (args.has("--after-exit")) {
+    // Started by the app's Restart button: the server is shutting itself down (killing it from here would
+    // also kill this process, its child). Wait for the port to free up.
+    await waitFor(async () => !(await isRunning()), 20);
+    fs.rmSync(PID_FILE, { force: true });
+  } else if (readPid() || (await isRunning())) await stop();
+  await start();
+} else await start();

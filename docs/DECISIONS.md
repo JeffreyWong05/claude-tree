@@ -141,3 +141,20 @@ trees still get a useful page.
 Back is an in-app stack of {view, scrollY, label}, pushed by every `goTo`/view switch (cap 50), popped by the
 "← Back to …" button or Backspace (ignored while typing). Browser history wasn't used: hash jumps already use
 `replaceState`, and pushing entries would make the browser's own Back step through every jump before leaving.
+
+## 2026-11-02 — Always-on reliability: separate build folder, in-app restart, catch-up after sleep
+Investigating "the app shuts down when I'm away" found three causes: (1) Windows power-offs/restarts end background
+programs (start-at-login was off); (2) the PC sleeps often — the server survives, but open pages lost their live
+connection; (3) a developer `next build` replaced `.next` under the running production server, causing
+ChunkLoadError / MODULE_NOT_FOUND (this is what looked like a crash).
+- The launcher builds and runs the everyday app with `CLAUDE_TREE_DIST=.next-app` (`distDir` in next.config.ts), so
+  `next build` / `next dev` (`.next`) can't touch it. `next build` added `.next-app/types` to tsconfig includes.
+- In-app Restart: the server spawns `launch.mjs --restart --after-exit` detached and then exits itself — killing the
+  server from the launcher would also kill the launcher (its child; `taskkill /t`). The launcher waits for the port,
+  rebuilds if sources are newer than the build, and starts again; the page polls `/api/health.startedAt` and reloads.
+  Launcher child processes use `windowsHide` so nothing pops up when it runs without a console.
+- `useLiveUpdates` refreshes once when its EventSource reconnects after an error (sleep, restart).
+- The start-at-login switch is recommended on the home page; the log is trimmed past 1 MB.
+- Next.js upgraded 16.4.0 → 16.4.4: the build refused to run on 16.4.0 (critical RCE advisories, confirmed via
+  `npm audit`). Used a plain `npm install next@16.4.4` rather than the build's suggested automated upgrade command.
+  Remaining audit findings are in ESLint's dependencies (dev-only, not in the running app).

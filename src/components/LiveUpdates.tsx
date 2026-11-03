@@ -33,8 +33,19 @@ export function useLiveUpdates(conversationId?: string): boolean {
       clearTimeout(timer);
       timer = setTimeout(refresh, Math.max(0, MIN_GAP_MS - (Date.now() - lastRefresh)));
     };
-    source.onopen = () => setLive(true);
-    source.onerror = () => setLive(false); // EventSource reconnects by itself
+    let dropped = false;
+    source.onopen = () => {
+      setLive(true);
+      // Back after a dropped connection (computer slept, server restarted): catch up on anything missed.
+      if (dropped) {
+        dropped = false;
+        refresh();
+      }
+    };
+    source.onerror = () => {
+      dropped = true;
+      setLive(false); // EventSource reconnects by itself
+    };
 
     const onVisible = () => {
       if (document.visibilityState === "visible" && missedWhileHidden) {

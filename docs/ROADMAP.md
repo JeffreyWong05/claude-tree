@@ -65,5 +65,7 @@ Tick items off as they land; add dates when a milestone completes.
 - [x] Home-page setup checklist (`/api/health`), installable app manifest + icons, non-coder README — 2026-10-18
 - [x] Published: https://github.com/JeffreyWong05/claude-tree (public) — 2026-10-18
 - [x] Background server: launcher starts it hidden and exits; in-app "Turn off" + `Stop Claude Tree`; in-app "start when I log in" switch; binds 127.0.0.1 only — 2026-10-20
+- [x] Robust always-on: app builds into its own folder (`.next-app`) so developer builds can't break it; in-app Restart / "Update & restart" (2 s, or ~10–15 s with a rebuild); pages catch up after sleep; log capped at 1 MB — 2026-11-02
+- [x] Next.js 16.4.0 → 16.4.4 (security patch for critical advisories) — 2026-11-02
 - [ ] Test the Mac launcher on a real Mac and its login item (written blind: Gatekeeper, PATH from Finder, nvm/Homebrew, LaunchAgent)
 - [ ] Sample data / demo mode for people without Claude Code chats yet
